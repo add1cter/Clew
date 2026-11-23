@@ -11,6 +11,7 @@ A personal Windows fork of [miuuyy/Clew](https://github.com/miuuyy/Clew), focuse
 - Allow prerequisite completion requirements to be disabled per workspace, while preserving prerequisite relationships and hints.
 - Build and release Windows x64 only. Keep other platform source files to make upstream merges easier.
 - Point new builds' update checks and release publishing to [add1cter/Clew](https://github.com/add1cter/Clew/releases).
+- Improve Chinese graph labels and direct-neighbor focus while retaining Clew's chapter clusters and lighting. Both 2D and 3D support dragging nodes and gentle cursor repulsion.
 
 ## Use
 

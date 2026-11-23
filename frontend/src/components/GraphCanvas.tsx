@@ -5,9 +5,9 @@ import {
   ZONE_GEOMETRY_REFRESH_FRAMES,
   ZONE_REVEAL_DURATION_FRAMES,
   ZONE_REVEAL_STAGGER_FRAMES,
+  buildZoneContour,
   averageAngles,
   buildAnchorMap,
-  buildZoneContour,
   cacheEntryKey,
   clamp,
   cloneManualNodePositions,
@@ -17,8 +17,6 @@ import {
   hexToRgb,
   highlightedZoneIdsForSelection,
   idleRenderOffset,
-  intersectsAny,
-  labelCandidateOrder,
   labelSpreadRadius,
   mixRgb,
   nodeFillColor,
@@ -29,12 +27,10 @@ import {
   positionCache,
   rgbaString,
   savePositionCache,
-  withinBounds,
   zoneIdByTopicId,
   type GraphCanvasPalette,
   type GraphCanvasThemeMode,
   type GraphNode,
-  type LabelBox,
   type ManualNodePositions,
   type NodeAnchor,
   type NodePosition,
@@ -42,6 +38,9 @@ import {
   type ZoneGeometry,
 } from "./graphCanvasCore";
 import { buildTopicAnchorPoint, screenToCanvasPoint, zoomViewportAroundClientPoint } from "./graphCanvasInteractions";
+import { GRAPH_LABEL_FONT, fitGraphLabel, graphFocus, graphNeighborhoods, placeGraphLabels, positionGraphTooltip, graphLabelOpacity, type GraphLabelCandidate } from "./graphPresentation";
+
+import { createGraphMotion, stepGraphMotion, wakeGraphMotion } from "./graphInteractionPhysics";
 
 export type { TopicAnchorPoint } from "./graphCanvasCore";
 
@@ -454,9 +453,12 @@ function GraphCanvasComponent({
 ): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const hoverLabelRef = useRef<HTMLDivElement | null>(null);
+  const hoveredTopicIdRef = useRef<string | null>(null);
+  const renderPositionsRef = useRef<Map<string, NodePosition>>(new Map());
+  const interactionMotionRef = useRef(createGraphMotion());
   const nodesRef = useRef<Map<string, NodePosition>>(new Map());
   const litFrameRef = useRef<Map<string, number>>(new Map());
-  const labelPlacementRef = useRef<Map<string, number>>(new Map());
   const graphSignatureRef = useRef<string>("");
   const structureActivityFrameRef = useRef<number>(0);
   const idleFrozenRef = useRef<boolean>(false);
@@ -468,7 +470,7 @@ function GraphCanvasComponent({
   const zoomRef = useRef<number>(initialZoom);
   const isDraggingRef = useRef<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
-  const draggedNodeRef = useRef<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
+  const draggedNodeRef = useRef<{ nodeId: string; offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean; persist: boolean } | null>(null);
   const manualPositionsRef = useRef<ManualNodePositions | null>(null);
   const disableIdleAnimationsRef = useRef<boolean>(disableIdleAnimations);
   const disableGridRef = useRef<boolean>(disableGrid);
@@ -584,6 +586,9 @@ function GraphCanvasComponent({
   );
 
   const nodesDataRef = useRef<GraphNode[]>(nodes);
+  const neighborhoods = useMemo(() => graphNeighborhoods(topics, edges), [topics, edges]);
+  const neighborhoodsRef = useRef(neighborhoods);
+  neighborhoodsRef.current = neighborhoods;
   const edgesDataRef = useRef<Edge[]>(edges);
   const zonesDataRef = useRef<Zone[]>(zones);
   const selectedTopicIdRef = useRef<string | null>(selectedTopicId);
@@ -619,6 +624,9 @@ function GraphCanvasComponent({
 
   useEffect(() => {
     graphSignatureRef.current = "";
+    hoveredTopicIdRef.current = null;
+    interactionMotionRef.current = createGraphMotion();
+    if (hoverLabelRef.current) hoverLabelRef.current.hidden = true;
     lastEmittedAnchorRef.current = null;
     idleSettleFramesRef.current = 0;
     idleFrozenRef.current = disableIdleAnimations;
@@ -734,13 +742,13 @@ function GraphCanvasComponent({
         ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
       if (viewportChanged) {
+        interactionMotionRef.current = createGraphMotion();
         viewportSignatureRef.current = viewportSignature;
         structureActivityFrameRef.current = frameCount;
         idleFrozenRef.current = false;
         idleFrozenFrameRef.current = null;
         idleSettleFramesRef.current = 0;
         lastEmittedAnchorRef.current = null;
-        labelPlacementRef.current.clear();
         zoneGeometryRef.current.clear();
         zoneRevealStartFrameRef.current = frameCount + (staticLayout ? 4 : Math.max(8, cascadeStepFramesRef.current));
         const hasManualLayout = Boolean(manualPositionsRef.current && Object.keys(manualPositionsRef.current).length > 0);
@@ -1007,7 +1015,6 @@ function GraphCanvasComponent({
         idleFrozenRef.current = false;
         idleFrozenFrameRef.current = null;
         idleSettleFramesRef.current = 0;
-        labelPlacementRef.current.clear();
         zoneGeometryRef.current.clear();
         if (!staticLayout) {
           scheduleCascade();
@@ -1062,7 +1069,7 @@ function GraphCanvasComponent({
             y: height / 2 - centerY,
           };
         }
-      } else {
+      } else if (interactionMotionRef.current.frames <= 0) {
         const pinnedPositions = manualPositionsRef.current ?? {};
         const draggedNodeId = draggedNodeRef.current?.nodeId ?? null;
         const idleAnimationsDisabled = disableIdleAnimationsRef.current;
@@ -1112,6 +1119,12 @@ function GraphCanvasComponent({
         }
       }
 
+      if (!staticLayout && interactionMotionRef.current.frames > 0) {
+        stepGraphMotion(positions, currentEdges, interactionMotionRef.current, draggedNodeRef.current?.nodeId ?? null,
+          hoveredTopicIdRef.current ?? selectedTopicIdRef.current);
+        idleFrozenRef.current = true;
+      }
+
       if (frameCount % 60 === 0) savePositionCache();
 
       if (backgroundFillRef.current) {
@@ -1126,6 +1139,7 @@ function GraphCanvasComponent({
       ctx2.translate(width / 2, height / 2);
       ctx2.scale(zoom, zoom);
       ctx2.translate(-width / 2 + panOffsetRef.current.x, -height / 2 + panOffsetRef.current.y);
+
       const renderIdleFrozen = disableIdleAnimationsRef.current && idleFrozenRef.current;
 
       drawZoneBackgrounds(width, height);
@@ -1167,6 +1181,8 @@ function GraphCanvasComponent({
         });
       }
       const edgePositions = idleVisualMotionEnabled ? positions : renderPositions;
+      renderPositionsRef.current = renderPositions;
+      const focus = graphFocus(neighborhoodsRef.current, selectedTopicIdRef.current, hoveredTopicIdRef.current);
       const bundleMetaByEdgeId = new Map<string, { angle: number; laneOffset: number; laneCount: number }>();
 
       const outgoingBySource = new Map<string, Array<{ edge: Edge; angle: number }>>();
@@ -1238,7 +1254,10 @@ function GraphCanvasComponent({
         } else {
           ctx2.lineTo(targetX, targetY);
         }
-        if (onPath) {
+        if (focus.edgeIds.has(edge.id)) {
+          ctx2.strokeStyle = themeModeRef.current === "dark" ? "rgba(168,139,250,0.8)" : "rgba(118,81,199,0.8)";
+          ctx2.lineWidth = 1.25 / zoom;
+        } else if (onPath) {
           if (themeModeRef.current === "light" && (highlightedSourceZone || highlightedTargetZone)) {
             const startRgb = hexToRgb(highlightedSourceZone?.color ?? highlightedTargetZone?.color ?? "#64748b") ?? { r: 100, g: 116, b: 139 };
             const endRgb = hexToRgb(highlightedTargetZone?.color ?? highlightedSourceZone?.color ?? "#64748b") ?? { r: 100, g: 116, b: 139 };
@@ -1257,13 +1276,15 @@ function GraphCanvasComponent({
           ctx2.lineWidth = 1.7;
         } else if (onFrontier) {
           ctx2.setLineDash([7, 9]);
-          ctx2.strokeStyle = `rgba(${paletteRef.current.edgeRgb},${0.012 + 0.05 * edgeBrightness})`;
-          ctx2.lineWidth = 1;
+          ctx2.strokeStyle = `rgba(${paletteRef.current.edgeRgb},${0.06 + 0.12 * edgeBrightness})`;
+          ctx2.lineWidth = 0.7 / zoom;
         } else {
-          ctx2.strokeStyle = `rgba(${paletteRef.current.edgeRgb},${0.012 + 0.05 * edgeBrightness})`;
-          ctx2.lineWidth = 1;
+          ctx2.strokeStyle = `rgba(${paletteRef.current.edgeRgb},${0.06 + 0.12 * edgeBrightness})`;
+          ctx2.lineWidth = 0.7 / zoom;
         }
+        ctx2.globalAlpha = focus.topicId && !focus.edgeIds.has(edge.id) ? (onPath ? 0.55 : 0.3) : 1;
         ctx2.stroke();
+        ctx2.globalAlpha = 1;
         if (onFrontier) {
           ctx2.setLineDash([]);
         }
@@ -1361,14 +1382,17 @@ function GraphCanvasComponent({
         ctx2.arc(position.x, position.y, r, 0, Math.PI * 2);
         ctx2.fill();
 
-        ctx2.globalAlpha = themeModeRef.current === "light" ? Math.max(0.34, brightness) : brightness;
+        const focusOpacity = focus.topicId && !focus.nodeIds.has(node.id) ? (onPath ? 0.7 : 0.35) : 1;
+        ctx2.globalAlpha = (themeModeRef.current === "light" ? Math.max(0.34, brightness) : brightness) * focusOpacity;
         ctx2.shadowBlur = selected ? 14 : onPath ? 8 : contextual ? 4 : 0;
         ctx2.shadowColor = selected
           ? paletteRef.current.shadowSelected
           : onPath
             ? paletteRef.current.shadowPath
             : paletteRef.current.shadowContext;
-        if (themeModeRef.current === "light" && highlightedZoneRgb) {
+        if (focus.nodeIds.has(node.id) && !selected && !onPath) {
+          ctx2.fillStyle = themeModeRef.current === "dark" ? "#a88bfa" : "#7651c7";
+        } else if (themeModeRef.current === "light" && highlightedZoneRgb) {
           const zoneTint = selected ? 0.78 : onPath ? 0.62 : 0.46;
           ctx2.fillStyle = rgbaString(highlightedZoneRgb, zoneTint);
         } else {
@@ -1379,114 +1403,56 @@ function GraphCanvasComponent({
         ctx2.fill();
         ctx2.globalAlpha = 1;
         ctx2.shadowBlur = 0;
+        if (node.id === focus.topicId && !selected) {
+          ctx2.strokeStyle = themeModeRef.current === "dark" ? "rgba(168,139,250,0.8)" : "rgba(118,81,199,0.8)";
+          ctx2.lineWidth = 1 / zoom;
+          ctx2.beginPath();
+          ctx2.arc(position.x, position.y, r + 4 / zoom, 0, Math.PI * 2);
+          ctx2.stroke();
+        }
       }
-
-      const placedLabels: LabelBox[] = [];
-      const labelNodes = [...currentNodes].sort((left, right) => {
-        const leftScore = (selectedTopicIdRef.current === left.id ? 100 : 0) + (pathNodeIdsRef.current.has(left.id) ? 10 : 0) + (ancestorIdsRef.current.has(left.id) ? 1 : 0);
-        const rightScore =
-          (selectedTopicIdRef.current === right.id ? 100 : 0) + (pathNodeIdsRef.current.has(right.id) ? 10 : 0) + (ancestorIdsRef.current.has(right.id) ? 1 : 0);
-        return rightScore - leftScore;
-      });
 
       ctx2.save();
-      ctx2.font = "10px 'Berkeley Mono', 'JetBrains Mono', monospace";
+      // Return to CSS-pixel coordinates for readable labels at every zoom level.
+      const pixelRatio = window.devicePixelRatio || 1;
+      ctx2.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       ctx2.textAlign = "center";
       ctx2.textBaseline = "middle";
-
-      for (const node of labelNodes) {
+      const labelContent = new Map<string, { text: string; alpha: number; strong: boolean }>();
+      const candidates: GraphLabelCandidate[] = [];
+      for (const node of currentNodes) {
+        if (node.id === selectedTopicIdRef.current) continue; // The topic popover owns its full title.
         const position = renderPositions.get(node.id);
-        const anchor = anchors.get(node.id);
-        if (!position || !anchor) continue;
-        const selected = selectedTopicIdRef.current === node.id;
-        // Skip canvas label for the selected topic — the popover already shows its title
-        // and a duplicated canvas label tends to collide with the popover body.
-        if (selected) continue;
+        if (!position) continue;
+        const neighbor = focus.nodeIds.has(node.id);
+        const hovered = node.id === hoveredTopicIdRef.current;
         const onPath = pathNodeIdsRef.current.has(node.id);
-        const contextual = ancestorIdsRef.current.has(node.id);
-        const isRoot = rootIdsRef.current.has(node.id);
+        const strong = neighbor || hovered || onPath;
         const litFrame = litFrameRef.current.get(node.id);
-        const fadeRate = Math.max(18, cascadeStepFramesRef.current * 1.5);
-        const brightness = litFrame === undefined ? 0 : Math.min(1, Math.max(0, (frameCount - litFrame) / fadeRate));
+        const brightness = litFrame === undefined ? 0 : Math.min(1, Math.max(0, (frameCount - litFrame) / Math.max(18, cascadeStepFramesRef.current * 1.5)));
         if (brightness < 0.1) continue;
-        const radius = nodeRadius(node, selected, onPath, isRoot);
-        const alpha = (selected ? 0.96 : onPath ? 0.76 : contextual ? 0.48 : 0.22) * brightness;
-        const textWidth = ctx2.measureText(node.title).width;
-        const candidates = [
-          { x: position.x, y: position.y - radius - 12 },
-          { x: position.x, y: position.y + radius + 12 },
-          { x: position.x - radius - 10, y: position.y },
-          { x: position.x + radius + 10, y: position.y },
-          { x: position.x, y: position.y - radius - 24 },
-          { x: position.x, y: position.y + radius + 24 },
-        ];
-        const cachedIndex = labelPlacementRef.current.get(node.id);
-        const preferredOrder = labelCandidateOrder();
-        // Try the cached label slot first to reduce placement oscillation.
-        const order =
-          cachedIndex === undefined
-            ? preferredOrder
-            : [cachedIndex, ...preferredOrder.filter((index) => index !== cachedIndex)];
-
-        let chosenIndex = order[0] ?? 0;
-        let chosen = candidates[chosenIndex];
-        let chosenBox: LabelBox = {
-          left: chosen.x - textWidth / 2 - 4,
-          right: chosen.x + textWidth / 2 + 4,
-          top: chosen.y - 8,
-          bottom: chosen.y + 8,
-        };
-
-        for (const candidateIndex of order) {
-          const candidate = candidates[candidateIndex];
-          const nextBox: LabelBox = {
-            left: candidate.x - textWidth / 2 - 4,
-            right: candidate.x + textWidth / 2 + 4,
-            top: candidate.y - 8,
-            bottom: candidate.y + 8,
-          };
-          if (withinBounds(nextBox, width, height) && !intersectsAny(nextBox, placedLabels)) {
-            chosenIndex = candidateIndex;
-            chosen = candidate;
-            chosenBox = nextBox;
-            break;
-          }
-        }
-
-        labelPlacementRef.current.set(node.id, chosenIndex);
-        if (themeModeRef.current === "light" && (selected || onPath)) {
-          chosen = { ...chosen, y: chosen.y - 2 };
-          chosenBox = {
-            left: chosenBox.left,
-            right: chosenBox.right,
-            top: chosenBox.top - 2,
-            bottom: chosenBox.bottom - 2,
-          };
-        }
-        placedLabels.push(chosenBox);
-        const nodeZoneId = zoneByTopicId.get(node.id) ?? null;
-        const effectiveZoneId = selected && selectedPrimaryZoneId ? selectedPrimaryZoneId : nodeZoneId;
-        const highlightedZone = (selected || onPath) && effectiveZoneId && selectedZoneIds.has(effectiveZoneId)
-          ? zoneById.get(effectiveZoneId) ?? null
-          : null;
-        const highlightedZoneRgb = highlightedZone ? hexToRgb(highlightedZone.color) : null;
-        if (themeModeRef.current === "light" && highlightedZoneRgb && (selected || onPath)) {
-          // Use an opaque cream chip so grid and edges do not bleed through selected labels.
-          const labelBg = mixRgb(highlightedZoneRgb, { r: 255, g: 255, b: 255 }, 0.9);
-          ctx2.beginPath();
-          ctx2.roundRect(chosenBox.left - 4, chosenBox.top - 3, chosenBox.right - chosenBox.left + 8, chosenBox.bottom - chosenBox.top + 6, 10);
-          ctx2.fillStyle = rgbaString(labelBg, 1);
-          ctx2.fill();
-          ctx2.lineWidth = 1;
-          ctx2.strokeStyle = rgbaString(highlightedZoneRgb, Math.min(0.88, 0.6 + alpha * 0.28));
-          ctx2.stroke();
-          ctx2.fillStyle = rgbaString(highlightedZoneRgb, Math.min(0.96, 0.74 + alpha * 0.22));
-        } else {
-          ctx2.fillStyle = `rgba(${paletteRef.current.labelRgb},${alpha})`;
-        }
-        ctx2.fillText(node.title, chosen.x, chosen.y);
+        ctx2.font = `${strong ? 500 : 400} ${strong ? 14 : 12}px ${GRAPH_LABEL_FONT}`;
+        const text = fitGraphLabel(node.title, Math.min(260, width - 40), value => ctx2.measureText(value).width);
+        const point = buildTopicAnchorPoint({ rect: { width, height }, position, zoom, panOffset: panOffsetRef.current });
+        const alpha = graphLabelOpacity(zoom, neighbor || hovered || onPath, Boolean(focus.topicId), onPath) * brightness;
+        if (alpha < 0.08) continue;
+        candidates.push({ id: node.id, x: point.x, y: point.y, width: ctx2.measureText(text).width + 6, height: 20,
+          radius: nodeRadius(node, false, onPath, rootIdsRef.current.has(node.id)) * zoom,
+          priority: hovered ? 1000 : neighbor ? 800 : onPath ? 400 : rootIdsRef.current.has(node.id) ? 200 : 0 });
+        labelContent.set(node.id, { text, alpha, strong });
       }
-
+      for (const [id, box] of placeGraphLabels(candidates, width, height)) {
+        const { text, alpha, strong } = labelContent.get(id)!;
+        ctx2.globalAlpha = alpha;
+        // A subtle text outline keeps links from crossing letter strokes, without a label card.
+        ctx2.lineJoin = "round";
+        ctx2.lineWidth = 3;
+        ctx2.strokeStyle = backgroundFillRef.current ?? (themeModeRef.current === "dark" ? "#000000" : "#faf9f6");
+        ctx2.font = `${strong ? 500 : 400} ${strong ? 14 : 12}px ${GRAPH_LABEL_FONT}`;
+        ctx2.fillStyle = themeModeRef.current === "dark" ? "#f1f5f9" : "#242a30";
+        ctx2.strokeText(text, box.x, box.y);
+        ctx2.fillText(text, box.x, box.y);
+      }
       ctx2.restore();
 
       for (const zone of zonesDataRef.current) {
@@ -1569,6 +1535,7 @@ function GraphCanvasComponent({
   }
 
   function resetPointerGestureState(): void {
+    clearHover();
     activePointersRef.current.clear();
     pinchGestureRef.current = null;
     dragStartRef.current = null;
@@ -1579,6 +1546,7 @@ function GraphCanvasComponent({
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLCanvasElement>): void {
+    clearHover();
     document.body.style.userSelect = "none";
     activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (canvasRef.current) {
@@ -1603,7 +1571,7 @@ function GraphCanvasComponent({
     }
 
     gestureConsumedRef.current = false;
-    if (layoutEditModeRef.current) {
+    {
       const { x: canvasX, y: canvasY } = screenToCanvas(event.clientX, event.clientY);
       let best: { id: string; d2: number } | null = null;
       for (const node of nodesDataRef.current) {
@@ -1614,16 +1582,19 @@ function GraphCanvasComponent({
         const d2 = dx * dx + dy * dy;
         if (!best || d2 < best.d2) best = { id: node.id, d2 };
       }
-      if (best && best.d2 < 28 * 28) {
+      const hitRadius = layoutEditModeRef.current ? 28 : Math.max(12 / zoomRef.current, 9);
+      if (best && best.d2 < hitRadius * hitRadius) {
         const position = nodesRef.current.get(best.id);
         if (position) {
           draggedNodeRef.current = {
             nodeId: best.id,
             offsetX: position.x - canvasX,
             offsetY: position.y - canvasY,
+            startX: event.clientX, startY: event.clientY, moved: false, persist: layoutEditModeRef.current,
           };
-          isDraggingRef.current = true;
-          gestureConsumedRef.current = true;
+          wakeGraphMotion(interactionMotionRef.current, nodesRef.current);
+          isDraggingRef.current = false;
+          gestureConsumedRef.current = false;
           if (canvasRef.current) canvasRef.current.style.cursor = "grabbing";
           return;
         }
@@ -1673,6 +1644,11 @@ function GraphCanvasComponent({
     if (draggedNodeRef.current) {
       const { x: canvasX, y: canvasY } = screenToCanvas(event.clientX, event.clientY);
       const activeDrag = draggedNodeRef.current;
+      if (!activeDrag.moved && Math.hypot(event.clientX - activeDrag.startX, event.clientY - activeDrag.startY) <= 4) return;
+      activeDrag.moved = true;
+      isDraggingRef.current = true;
+      gestureConsumedRef.current = true;
+      wakeGraphMotion(interactionMotionRef.current, nodesRef.current);
       const position = nodesRef.current.get(activeDrag.nodeId);
       if (!position) return;
       const nextX = canvasX + activeDrag.offsetX;
@@ -1685,10 +1661,32 @@ function GraphCanvasComponent({
         ...(manualPositionsRef.current ?? {}),
         [activeDrag.nodeId]: { x: nextX, y: nextY },
       };
-      manualPositionsRef.current = nextManualPositions;
+      if (activeDrag.persist) manualPositionsRef.current = nextManualPositions;
       return;
     }
-    if (!dragStartRef.current) return;
+    if (!dragStartRef.current) {
+      if (event.pointerType === "touch" || layoutEditModeRef.current) return;
+      const point = screenToCanvas(event.clientX, event.clientY);
+      let nearest: { id: string; distance: number } | null = null;
+      for (const node of nodesDataRef.current) {
+        const position = renderPositionsRef.current.get(node.id);
+        if (!position) continue;
+        const distance = Math.hypot(position.x - point.x, position.y - point.y);
+        if (distance <= Math.max(12 / zoomRef.current, 9) && (!nearest || distance < nearest.distance)) nearest = { id: node.id, distance };
+      }
+      hoveredTopicIdRef.current = nearest?.id ?? null;
+      if (!staticLayout) {
+        wakeGraphMotion(interactionMotionRef.current, nodesRef.current, 100);
+        interactionMotionRef.current.cursor = { position: point, radius: 64 / zoomRef.current };
+      }
+      if (canvasRef.current) canvasRef.current.style.cursor = nearest ? "pointer" : "grab";
+      const hover = hoverLabelRef.current;
+      const rect = containerRef.current?.getBoundingClientRect();
+      const topic = nearest ? nodesDataRef.current.find(node => node.id === nearest.id) : null;
+      if (hover && rect && topic) positionGraphTooltip(hover, topic.title, event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
+      else if (hover) hover.hidden = true;
+      return;
+    }
     const dx = event.clientX - dragStartRef.current.x;
     const dy = event.clientY - dragStartRef.current.y;
     if (Math.hypot(dx, dy) > 5) isDraggingRef.current = true;
@@ -1729,13 +1727,15 @@ function GraphCanvasComponent({
     }
 
     if (draggedNodeRef.current) {
+      const drag = draggedNodeRef.current;
+      if (drag.persist && drag.moved && manualPositionsRef.current) onNodePositionsChangeRef.current?.(cloneManualNodePositions(manualPositionsRef.current));
+      if (!drag.persist && !drag.moved) onSelectTopicRef.current(drag.nodeId, buildTopicAnchor(drag.nodeId));
+      const position = nodesRef.current.get(drag.nodeId);
+      if (!drag.persist && drag.moved && position) interactionMotionRef.current.homes.set(drag.nodeId, { x: position.x, y: position.y });
       draggedNodeRef.current = null;
       isDraggingRef.current = false;
-      if (manualPositionsRef.current) {
-        onNodePositionsChangeRef.current?.(cloneManualNodePositions(manualPositionsRef.current));
-      }
-      if (canvasRef.current) canvasRef.current.style.cursor = layoutEditModeRef.current ? "crosshair" : "grab";
-      gestureConsumedRef.current = true;
+      gestureConsumedRef.current = false;
+      resetPointerGestureState();
       return;
     }
     if (!gestureConsumedRef.current && !isDraggingRef.current && dragStartRef.current) {
@@ -1793,6 +1793,13 @@ function GraphCanvasComponent({
     document.body.style.userSelect = "";
   }
 
+  function clearHover(): void {
+    hoveredTopicIdRef.current = null;
+    interactionMotionRef.current.cursor = null;
+    if (interactionMotionRef.current.homes.size) interactionMotionRef.current.frames = 120;
+    if (hoverLabelRef.current) hoverLabelRef.current.hidden = true;
+  }
+
   return (
     <div ref={containerRef} className="neuroGraphSurface">
       <canvas
@@ -1803,7 +1810,9 @@ function GraphCanvasComponent({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onPointerLeave={clearHover}
       />
+      <div ref={hoverLabelRef} className="graphHoverLabel" role="tooltip" hidden />
     </div>
   );
 }

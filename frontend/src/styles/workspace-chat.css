@@ -556,19 +556,23 @@ select.input {
   color: #fff;
 }
 
-.graph3dHoverLabel {
+.graphHoverLabel {
   position: absolute;
   left: 0;
   top: 0;
   z-index: 2;
-  max-width: min(320px, calc(100% - 32px));
+  max-width: min(360px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 7px 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 9px;
-  background: rgba(10, 10, 10, 0.9);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 12px;
-  line-height: 1.35;
+  background: rgba(9, 14, 18, 0.97);
+  color: #f1f5f9;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
   pointer-events: none;
   backdrop-filter: blur(12px);
   will-change: transform;
@@ -584,10 +588,15 @@ select.input {
 }
 
 :root[data-theme="light"] .graph3dNavigationHint,
-:root[data-theme="light"] .graph3dHoverLabel {
+:root[data-theme="light"] .graphHoverLabel {
   border-color: rgba(60, 52, 45, 0.12);
   background: rgba(247, 247, 244, 0.82);
   color: rgba(52, 47, 43, 0.64);
+}
+
+:root[data-theme="light"] .graphHoverLabel {
+  background: rgba(250, 249, 246, 0.98);
+  color: #242a30;
 }
 
 :root[data-theme="light"] .graph3dNavigationHint button {

@@ -14,12 +14,15 @@ import {
   type TopicAnchorPoint,
 } from "./graphCanvasCore";
 import { buildGraph3DLayout, type Graph3DLayout, type GraphPoint3D } from "./graph3dCore";
+import { createGraphMotion, stepGraphMotion, wakeGraphMotion } from "./graphInteractionPhysics";
+import { GRAPH_LABEL_FONT, fitGraphLabel, graphFocus, graphNeighborhoods, placeGraphLabels, positionGraphTooltip, type GraphFocus, type GraphLabelCandidate } from "./graphPresentation";
 
 type LabelVisual = { sprite: THREE.Sprite; material: THREE.SpriteMaterial };
 type ZoneVisual = { mesh: THREE.Mesh; material: THREE.ShaderMaterial; label: LabelVisual; topicIds: Set<string> };
 type EdgeRecord = { edge: Edge; colorOffset: number };
 
 type SceneVisuals = {
+  focus: GraphFocus;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   edgeColorAttribute: THREE.BufferAttribute;
@@ -48,37 +51,30 @@ function plainLabel(value: string): string {
 function createLabelVisual(text: string, themeMode: GraphCanvasThemeMode, untitled: string, accent = false): LabelVisual {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d")!;
-  const letters = Array.from(plainLabel(text) || untitled);
-  const fontSize = accent ? 27 : 23;
-  context.font = `${accent ? 650 : 520} ${fontSize}px Manrope, Inter, sans-serif`;
-  const prefix = letters.slice(0, 76);
-  let label = prefix.join("") + (prefix.length < letters.length ? "…" : "");
-  while (context.measureText(label).width > 604 && prefix.length) {
-    prefix.pop();
-    label = prefix.join("") + "…";
-  }
-  const measuredWidth = Math.ceil(context.measureText(label).width);
-  canvas.width = Math.min(640, Math.max(128, measuredWidth + 36));
-  canvas.height = accent ? 58 : 52;
-  context.font = `${accent ? 650 : 520} ${fontSize}px Manrope, Inter, sans-serif`;
+  const font = `600 28px ${GRAPH_LABEL_FONT}`;
+  context.font = font;
+  const label = fitGraphLabel(plainLabel(text) || untitled, 480, value => context.measureText(value).width);
+  canvas.width = Math.max(64, Math.ceil(context.measureText(label).width) + 28);
+  canvas.height = 56;
+  context.font = font;
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillStyle = themeMode === "dark"
-    ? (accent ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.78)")
-    : (accent ? "rgba(45,43,40,0.96)" : "rgba(45,43,40,0.78)");
+  context.lineJoin = "round";
+  context.lineWidth = 5;
+  context.strokeStyle = themeMode === "dark" ? "#000000" : "#faf9f6";
+  context.strokeText(label, canvas.width / 2, canvas.height / 2);
+  context.fillStyle = themeMode === "dark" ? "#f1f5f9" : "#242a30";
   context.fillText(label, canvas.width / 2, canvas.height / 2);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthWrite: false,
-    opacity: accent ? 0.64 : 0.34,
-  });
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false,
+    depthTest: accent, fog: false, toneMapped: false, opacity: accent ? 0.64 : 0.96 });
   const sprite = new THREE.Sprite(material);
   const width = Math.min(58, Math.max(18, canvas.width / 10));
   sprite.scale.set(width, width * (canvas.height / canvas.width), 1);
+  sprite.userData.pixelWidth = canvas.width / 2;
+  sprite.userData.pixelHeight = canvas.height / 2;
   return { sprite, material };
 }
 
@@ -387,7 +383,42 @@ function projectedAnchor(position: THREE.Vector3, state: SceneVisuals): TopicAnc
   return { x, y, side: x > width * 0.56 ? "left" : "right" };
 }
 
+function updateScreenLabels(state: SceneVisuals, rootIds: Set<string>, pathIds: Set<string>, hoveredId: string | null): void {
+  const width = state.renderer.domElement.clientWidth;
+  const height = state.renderer.domElement.clientHeight;
+  if (!width || !height) return;
+  state.camera.updateMatrixWorld();
+  const candidates: GraphLabelCandidate[] = [];
+  const metrics = new Map<string, { depth: number; unitsPerPixel: number }>();
+  const unitsAtDepth = 2 * Math.tan(THREE.MathUtils.degToRad(state.camera.fov / 2)) / height;
+  for (const [id, label] of state.labels) {
+    label.sprite.visible = false;
+    const position = state.positions.get(id)!;
+    const depth = -position.clone().applyMatrix4(state.camera.matrixWorldInverse).z;
+    const projected = position.clone().project(state.camera);
+    if (depth <= state.camera.near || projected.z < -1 || projected.z > 1 || Math.abs(projected.x) > 1.1 || Math.abs(projected.y) > 1.1) continue;
+    const unitsPerPixel = unitsAtDepth * depth;
+    metrics.set(id, { depth: projected.z, unitsPerPixel });
+    candidates.push({ id, x: (projected.x * 0.5 + 0.5) * width, y: (-projected.y * 0.5 + 0.5) * height,
+      width: Number(label.sprite.userData.pixelWidth), height: Number(label.sprite.userData.pixelHeight),
+      radius: Math.max(4, Math.min(28, 2.15 / unitsPerPixel * (id === state.focus.topicId ? 1.62 : 1.24))),
+      priority: (id === state.focus.topicId ? 1200 : id === hoveredId ? 1100 : state.focus.nodeIds.has(id) ? 800 : pathIds.has(id) ? 400 : rootIds.has(id) ? 200 : 0)
+        + Math.max(0, 90 - depth / 20) });
+  }
+  // Limit clutter and sprite draw calls; focus labels always rank ahead of context.
+  candidates.sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
+  for (const [id, box] of placeGraphLabels(candidates.slice(0, 144), width, height)) {
+    const { sprite } = state.labels.get(id)!;
+    const metric = metrics.get(id)!;
+    sprite.visible = true;
+    sprite.position.set(box.x / width * 2 - 1, 1 - box.y / height * 2, metric.depth).unproject(state.camera);
+    sprite.scale.set(box.width * metric.unitsPerPixel, box.height * metric.unitsPerPixel, 1);
+    sprite.renderOrder = id === state.focus.topicId || id === hoveredId ? 8 : 4;
+  }
+}
+
 function applyAppearance(args: {
+  focus: GraphFocus;
   state: SceneVisuals;
   topics: Topic[];
   edges: Edge[];
@@ -399,27 +430,26 @@ function applyAppearance(args: {
   frontierEdgeIds: Set<string>;
   themeMode: GraphCanvasThemeMode;
 }): void {
-  const { state, topics, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode } = args;
+  const { state, topics, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode, focus } = args;
+  state.focus = focus;
   const matrix = new THREE.Matrix4();
   topics.forEach((topic, index) => {
     const position = state.positions.get(topic.id)!;
     const selected = topic.id === selectedTopicId;
     const onPath = pathNodeIds.has(topic.id);
-    const scale = selected ? 1.62 : onPath ? 1.24 : rootIds.has(topic.id) ? 1.12 : 1;
+    const neighbor = focus.nodeIds.has(topic.id);
+    const scale = selected ? 1.62 : topic.id === focus.topicId ? 1.45 : neighbor || onPath ? 1.24 : rootIds.has(topic.id) ? 1.12 : 1;
     matrix.compose(position, new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
     state.nodeMesh.setMatrixAt(index, matrix);
     const active = selected || onPath;
     const nodeColor = themeMode === "dark"
-      ? new THREE.Color(active ? 0xeff1f2 : 0x5e6468)
-      : new THREE.Color(active ? 0x6f665e : 0xb3a99e);
+      ? new THREE.Color(neighbor ? 0xa88bfa : active ? 0xeff1f2 : 0x5e6468)
+      : new THREE.Color(neighbor ? 0x7651c7 : active ? 0x6f665e : 0xb3a99e);
+    if (focus.topicId && !neighbor) nodeColor.multiplyScalar(onPath ? 0.72 : 0.38);
     state.nodeMesh.setColorAt(index, nodeColor);
     const label = state.labels.get(topic.id);
     if (label) {
-      label.material.opacity = selected ? 1 : onPath ? 0.9 : rootIds.has(topic.id) ? 0.82 : (themeMode === "dark" ? 0.64 : 0.52);
-      const baseWidth = Number(label.sprite.userData.baseWidth ?? label.sprite.scale.x);
-      const baseHeight = Number(label.sprite.userData.baseHeight ?? label.sprite.scale.y);
-      const labelScale = selected ? 1.22 : onPath ? 1.08 : 1;
-      label.sprite.scale.set(baseWidth * labelScale, baseHeight * labelScale, 1);
+      label.material.opacity = selected || neighbor ? 1 : focus.topicId ? (onPath ? 0.75 : 0.42) : 0.96;
     }
   });
   state.nodeMesh.instanceMatrix.needsUpdate = true;
@@ -428,7 +458,7 @@ function applyAppearance(args: {
   for (const [topicId, material] of state.rootRings) {
     material.opacity = topicId === selectedTopicId ? 0 : 0.22;
   }
-  const selectedPosition = selectedTopicId ? state.positions.get(selectedTopicId) : null;
+  const selectedPosition = focus.topicId ? state.positions.get(focus.topicId) : null;
   state.selectedRing.visible = Boolean(selectedPosition);
   if (selectedPosition) state.selectedRing.position.copy(selectedPosition);
   state.selectedRingMaterial.opacity = selectedPosition ? 0.92 : 0;
@@ -439,8 +469,11 @@ function applyAppearance(args: {
     ? new THREE.Color().setRGB(1.35, 1.38, 1.4)
     : new THREE.Color(0x6f665e);
   const frontierColor = new THREE.Color(themeMode === "dark" ? 0xd8c071 : 0xa97f25);
+  const neighborColor = new THREE.Color(themeMode === "dark" ? 0xa88bfa : 0x7651c7);
   for (const record of state.edgeRecords) {
-    const color = pathEdgeIds.has(record.edge.id) ? pathColor : frontierEdgeIds.has(record.edge.id) ? frontierColor : baseColor;
+    const direct = focus.edgeIds.has(record.edge.id);
+    const color = (direct ? neighborColor : pathEdgeIds.has(record.edge.id) ? pathColor : frontierEdgeIds.has(record.edge.id) ? frontierColor : baseColor).clone();
+    if (focus.topicId && !direct) color.multiplyScalar(pathEdgeIds.has(record.edge.id) ? 0.65 : 0.3);
     colors.set([color.r, color.g, color.b, color.r, color.g, color.b], record.colorOffset);
   }
   state.edgeColorAttribute.needsUpdate = true;
@@ -490,6 +523,12 @@ export function Graph3DCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hoverRef = useRef<HTMLDivElement | null>(null);
+  const hoveredTopicIdRef = useRef<string | null>(null);
+  const neighborhoods = useMemo(() => graphNeighborhoods(topics, edges), [topics, edges]);
+  const neighborhoodsRef = useRef(neighborhoods);
+  neighborhoodsRef.current = neighborhoods;
+  const appearanceRef = useRef({ topics, edges, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode });
+  appearanceRef.current = { topics, edges, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode };
   const sceneRef = useRef<SceneVisuals | null>(null);
   const resetViewRef = useRef<() => void>(() => undefined);
   const onSelectTopicRef = useRef(onSelectTopic);
@@ -547,6 +586,7 @@ export function Graph3DCanvas({
     controls.maxDistance = Math.max(1600, layout.radius * 10);
 
     const positions = new Map([...layout.positions].map(([id, point]) => [id, graphPointToVector(point)]));
+    const motion = createGraphMotion();
     const center = graphPointToVector(layout.center);
     const fitView = (): void => {
       const fitDistance = Math.max(180, layout.radius / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * 1.08);
@@ -642,23 +682,10 @@ export function Graph3DCanvas({
     scene.add(nodeMesh);
 
     const labels = new Map<string, LabelVisual>();
-    const labelRankById = new Map(
-      [...topics]
-        .sort((left, right) => {
-          const rootDifference = Number(!rootIds.has(left.id)) - Number(!rootIds.has(right.id));
-          if (rootDifference !== 0) return rootDifference;
-          if (left.level !== right.level) return left.level - right.level;
-          return hashString(left.id) - hashString(right.id);
-        })
-        .map((topic, index) => [topic.id, index]),
-    );
     topics.forEach((topic) => {
       const position = positions.get(topic.id)!;
       const label = createLabelVisual(topic.title, themeMode, copy.untitled);
       label.sprite.position.copy(position).add(new THREE.Vector3(0, 7.2, 0));
-      label.sprite.userData.baseWidth = label.sprite.scale.x;
-      label.sprite.userData.baseHeight = label.sprite.scale.y;
-      label.sprite.userData.lodRank = labelRankById.get(topic.id) ?? topics.length;
       label.sprite.renderOrder = 4;
       labels.set(topic.id, label);
       scene.add(label.sprite);
@@ -685,6 +712,7 @@ export function Graph3DCanvas({
     scene.add(selectedRing);
 
     const state: SceneVisuals = {
+      focus: graphFocus(neighborhoodsRef.current, selectedTopicIdRef.current, null),
       camera,
       controls,
       edgeColorAttribute,
@@ -700,7 +728,22 @@ export function Graph3DCanvas({
       zoneVisuals,
     };
     sceneRef.current = state;
-    applyAppearance({ state, topics, edges, zones, selectedTopicId: selectedTopicIdRef.current, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode });
+    hoveredTopicIdRef.current = null;
+    if (hoverRef.current) hoverRef.current.hidden = true;
+    const refreshAppearance = (): void => applyAppearance({ ...appearanceRef.current, state,
+      focus: graphFocus(neighborhoodsRef.current, selectedTopicIdRef.current, hoveredTopicIdRef.current) });
+    const updateHovered = (topicId: string | null): void => {
+      if (hoveredTopicIdRef.current === topicId) return;
+      hoveredTopicIdRef.current = topicId;
+      refreshAppearance();
+    };
+    const clearHover = (): void => {
+      updateHovered(null);
+      motion.cursor = null;
+      if (motion.homes.size) motion.frames = 120;
+      if (hoverRef.current) hoverRef.current.hidden = true;
+    };
+    refreshAppearance();
 
     const resize = (): void => {
       const width = Math.max(1, mount.clientWidth);
@@ -719,6 +762,8 @@ export function Graph3DCanvas({
     let pointerStart: { x: number; y: number } | null = null;
     let pointerPressed = false;
     let rightMouseLook = false;
+    let draggedNode: { id: string; plane: THREE.Plane; offset: THREE.Vector3 } | null = null;
+    let dragMoved = false;
     let lookPointer = { x: 0, y: 0 };
     const raycastNode = (event: PointerEvent | MouseEvent): number | null => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -729,6 +774,7 @@ export function Graph3DCanvas({
       return hit?.instanceId ?? null;
     };
     const handlePointerDown = (event: PointerEvent): void => {
+      clearHover();
       container.focus({ preventScroll: true });
       if (event.button === 2) {
         event.preventDefault();
@@ -743,6 +789,18 @@ export function Graph3DCanvas({
       if (event.button !== 0) return;
       pointerStart = { x: event.clientX, y: event.clientY };
       pointerPressed = true;
+      const instanceId = raycastNode(event);
+      if (instanceId != null) {
+        const id = state.nodeIds[instanceId];
+        const position = positions.get(id)!;
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), position);
+        const hit = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+        draggedNode = { id, plane, offset: hit ? position.clone().sub(hit) : new THREE.Vector3() };
+        dragMoved = false;
+        wakeGraphMotion(motion, positions);
+        controls.enabled = false;
+        renderer.domElement.setPointerCapture(event.pointerId);
+      }
     };
     const handlePointerUp = (event: PointerEvent): void => {
       if (event.button === 2 || rightMouseLook) {
@@ -754,6 +812,18 @@ export function Graph3DCanvas({
       }
       if (event.button !== 0) return;
       pointerPressed = false;
+      if (draggedNode) {
+        const finishedDrag = draggedNode;
+        draggedNode = null;
+        controls.enabled = true;
+        if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+        if (dragMoved) {
+          motion.homes.set(finishedDrag.id, positions.get(finishedDrag.id)!.clone());
+          motion.frames = 150;
+          dragMoved = false;
+          return;
+        }
+      }
       if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
       const instanceId = raycastNode(event);
       if (instanceId == null) {
@@ -765,6 +835,16 @@ export function Graph3DCanvas({
       onSelectTopicRef.current(topicId, projectedAnchor(position, state));
     };
     const handlePointerMove = (event: PointerEvent): void => {
+      if (pointerPressed && draggedNode && pointerStart) {
+        if (!dragMoved && Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) <= 5) return;
+        dragMoved = true;
+        raycastNode(event);
+        const hit = raycaster.ray.intersectPlane(draggedNode.plane, new THREE.Vector3());
+        if (hit) positions.get(draggedNode.id)!.copy(hit).add(draggedNode.offset);
+        motion.frames = 180;
+        renderer.domElement.style.cursor = "grabbing";
+        return;
+      }
       if (rightMouseLook) {
         const deltaX = event.clientX - lookPointer.x;
         const deltaY = event.clientY - lookPointer.y;
@@ -778,8 +858,28 @@ export function Graph3DCanvas({
         controls.target.copy(camera.position).add(direction.multiplyScalar(distance));
         return;
       }
-      if (pointerPressed) return;
+      if (pointerPressed || event.pointerType === "touch") return;
       const instanceId = raycastNode(event);
+      updateHovered(instanceId == null ? null : state.nodeIds[instanceId]);
+      const bounds = renderer.domElement.getBoundingClientRect();
+      let cursorAnchor = controls.target;
+      let nearestScreenDistance = 72 * 72;
+      for (const position of positions.values()) {
+        const screen = position.clone().project(camera);
+        if (screen.z < -1 || screen.z > 1) continue;
+        const dx = (screen.x - pointer.x) * bounds.width / 2;
+        const dy = (screen.y - pointer.y) * bounds.height / 2;
+        const distance = dx * dx + dy * dy;
+        if (distance < nearestScreenDistance) { nearestScreenDistance = distance; cursorAnchor = position; }
+      }
+      const viewDirection = camera.getWorldDirection(new THREE.Vector3());
+      const cursorPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDirection, cursorAnchor);
+      const cursorPoint = raycaster.ray.intersectPlane(cursorPlane, new THREE.Vector3());
+      if (cursorPoint) {
+        wakeGraphMotion(motion, positions, 100);
+        motion.cursor = { position: cursorPoint, radius: 64 * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+          * Math.abs(cursorAnchor.clone().sub(camera.position).dot(viewDirection)) / Math.max(1, renderer.domElement.clientHeight) };
+      }
       renderer.domElement.style.cursor = instanceId == null ? "grab" : "pointer";
       const hover = hoverRef.current;
       if (!hover) return;
@@ -787,13 +887,14 @@ export function Graph3DCanvas({
         hover.hidden = true;
         return;
       }
-      hover.hidden = false;
-      hover.textContent = topics[instanceId]?.title ?? "";
       const rect = container.getBoundingClientRect();
-      hover.style.transform = `translate(${event.clientX - rect.left + 14}px, ${event.clientY - rect.top + 14}px)`;
+      positionGraphTooltip(hover, topics[instanceId]?.title ?? "", event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height);
     };
     const handleContextMenu = (event: MouseEvent): void => event.preventDefault();
     const handlePointerCancel = (event: PointerEvent): void => {
+      clearHover();
+      draggedNode = null;
+      dragMoved = false;
       pointerPressed = false;
       rightMouseLook = false;
       controls.enabled = true;
@@ -815,6 +916,7 @@ export function Graph3DCanvas({
     renderer.domElement.addEventListener("pointercancel", handlePointerCancel);
     renderer.domElement.addEventListener("contextmenu", handleContextMenu);
     renderer.domElement.addEventListener("dblclick", handleDoubleClick);
+    renderer.domElement.addEventListener("pointerleave", clearHover);
 
     const pressedKeys = new Set<string>();
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -824,7 +926,7 @@ export function Graph3DCanvas({
       }
     };
     const handleKeyUp = (event: KeyboardEvent): void => { pressedKeys.delete(event.code); };
-    const clearPressedKeys = (): void => { pressedKeys.clear(); };
+    const clearPressedKeys = (): void => { pressedKeys.clear(); clearHover(); };
     container.addEventListener("keydown", handleKeyDown);
     container.addEventListener("keyup", handleKeyUp);
     container.addEventListener("blur", clearPressedKeys);
@@ -856,22 +958,26 @@ export function Graph3DCanvas({
         controls.target.add(movement);
       }
       controls.update(delta);
+      if (stepGraphMotion(positions, edges, motion, draggedNode?.id ?? null, hoveredTopicIdRef.current ?? selectedTopicIdRef.current, delta * 60)) {
+        refreshAppearance();
+        const edgeAttribute = edgeGeometry.getAttribute("position") as THREE.BufferAttribute;
+        edgeRecords.forEach(({ edge }, index) => {
+          const source = positions.get(edge.source_topic_id)!;
+          const target = positions.get(edge.target_topic_id)!;
+          edgeAttribute.setXYZ(index * 2, source.x, source.y, source.z);
+          edgeAttribute.setXYZ(index * 2 + 1, target.x, target.y, target.z);
+        });
+        edgeAttribute.needsUpdate = true;
+        nodeMesh.computeBoundingSphere();
+      }
       for (const visual of zoneVisuals.values()) {
         visual.material.uniforms["uCameraLocal"].value.copy(camera.position);
         visual.mesh.worldToLocal(visual.material.uniforms["uCameraLocal"].value);
         visual.material.uniforms["uTime"].value = (now - animationStartedAt) / 1000;
       }
+      updateScreenLabels(state, rootIds, pathNodeIdsRef.current, hoveredTopicIdRef.current);
       composer.render();
       frame += 1;
-      if (frame % 6 === 0 && highDensityGraph) {
-        const distanceRatio = camera.position.distanceTo(controls.target) / Math.max(layout.radius, 1);
-        const labelLimit = distanceRatio > 2.05 ? 48 : distanceRatio > 1.2 ? 96 : 180;
-        for (const [topicId, label] of labels) {
-          label.sprite.visible = topicId === selectedTopicIdRef.current
-            || pathNodeIdsRef.current.has(topicId)
-            || Number(label.sprite.userData.lodRank ?? topics.length) < labelLimit;
-        }
-      }
       if (frame % 5 === 0 && selectedTopicIdRef.current) {
         const selectedPosition = positions.get(selectedTopicIdRef.current);
         const anchor = selectedPosition ? projectedAnchor(selectedPosition, state) : null;
@@ -895,6 +1001,7 @@ export function Graph3DCanvas({
       renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
       renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
       renderer.domElement.removeEventListener("dblclick", handleDoubleClick);
+      renderer.domElement.removeEventListener("pointerleave", clearHover);
       container.removeEventListener("keydown", handleKeyDown);
       container.removeEventListener("keyup", handleKeyUp);
       container.removeEventListener("blur", clearPressedKeys);
@@ -923,7 +1030,8 @@ export function Graph3DCanvas({
   useEffect(() => {
     const state = sceneRef.current;
     if (!state) return;
-    applyAppearance({ state, topics, edges, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode });
+    applyAppearance({ state, topics, edges, zones, selectedTopicId, rootIds, pathNodeIds, pathEdgeIds, frontierEdgeIds, themeMode,
+      focus: graphFocus(neighborhoodsRef.current, selectedTopicId, hoveredTopicIdRef.current) });
     const selectedPosition = selectedTopicId ? state.positions.get(selectedTopicId) : null;
     onSelectedTopicAnchorChange(selectedPosition ? projectedAnchor(selectedPosition, state) : null);
   }, [edges, frontierEdgeIds, onSelectedTopicAnchorChange, pathEdgeIds, pathNodeIds, rootIds, selectedTopicId, themeMode, topics, zones]);
@@ -931,7 +1039,7 @@ export function Graph3DCanvas({
   return (
     <div ref={containerRef} className="graph3dSurface" tabIndex={0} aria-label={copy.interactive3d}>
       <div ref={mountRef} className="graph3dMount" />
-      <div ref={hoverRef} className="graph3dHoverLabel" hidden />
+      <div ref={hoverRef} className="graphHoverLabel" role="tooltip" hidden />
       <div className="graph3dNavigationHint">
         <span>{copy.navigation3d}</span>
         <button type="button" onClick={() => resetViewRef.current()}>{copy.resetView}</button>
