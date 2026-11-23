@@ -1,102 +1,50 @@
-# Clew
-
-这是 [miuuyy/Clew](https://github.com/miuuyy/Clew) 的 Windows 自用分支。修改内容与构建方式见 [自用分支说明](docs/PERSONAL_FORK.md)。
+# Clew Windows 自用版
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[在 ChatGPT 中试用](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e) · [下载桌面版](https://github.com/miuuyy/Clew/releases/latest) · [中文使用指南](docs/USAGE_GUIDE.zh-CN.md) · [参与贡献](CONTRIBUTING.md) · [MIT 许可证](LICENSE)
+基于 [miuuyy/Clew](https://github.com/miuuyy/Clew) 的个人定制分支，主要用于 Windows 下的中文学习。Clew 用本地知识图谱组织学习主题、先修关系、测验和进度。
 
-**围绕交互式知识图谱构建的 AI 学习工作区。**
+## 本分支的修改
 
-[![在 ChatGPT 中演示 Clew：生成学习图谱、浏览主题并开始测验](.github/readme-assets/chatgpt-demo.gif)](https://github.com/miuuyy/Clew/raw/refs/heads/main/.github/readme-assets/chatgpt-demo.mp4)
+- 修复 Windows 较长的 ChatGPT 登录凭据写入问题，拆分存入系统凭据库并验证完整性。
+- 测验题目、选项和解析使用知识图谱的语言；修改图谱语言后重新生成旧语言的测验。
+- 支持按工作区关闭先修主题的完成限制，保留先修关系和提示。
+- 仅构建和发布 Windows x64 安装包，保留其它平台源码，方便以后合并上游更新。
+- 新构建的更新检查和发布目标指向 [add1cter/Clew](https://github.com/add1cter/Clew/releases)。
 
-[观看 45 秒演示](https://github.com/miuuyy/Clew/raw/refs/heads/main/.github/readme-assets/chatgpt-demo.mp4)。视频录制于 ChatGPT 插件。
+## 使用
 
-告诉 Clew 你已经掌握了什么、想学到什么。它会整理主题和先修关系，再沿着这张图谱帮你学习。你可以在 ChatGPT 中使用 Clew，也可以使用开源桌面版。
+发布的 Windows 安装包会放在本仓库的 [Releases](https://github.com/add1cter/Clew/releases)。也可以按下文自行构建。
 
-## 在 ChatGPT 中试用
+打开 Clew，选择 **使用 ChatGPT 继续**。应用需要 ChatGPT Plus 或 Pro 订阅，并需要授权使用订阅用量。
 
-打开 [Clew 插件](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e)，连接后告诉 ChatGPT 你想学什么。例如：
+要生成中文测验，请将**知识图谱语言**设为简体中文（`zh-CN`），界面语言是另一项独立设置。要直接测验尚未完成先修主题的章节，将工作区配置 `require_prerequisite_closure_for_completion` 设为 `false`；通过后只完成当前主题。
 
-> 我掌握了基础代数，想做第一个机器学习项目。请在 Clew 中用简体中文规划学习路径，并补上我缺少的基础。
+图谱、对话和学习进度保存在本地工作区数据库中，登录凭据保存在系统凭据库中。AI 请求会将对话和相关学习上下文发送给 OpenAI。个人工作区的设置和数据不包含在本仓库中。
 
-学习图谱会显示在对话旁。登录后，可以将学习路径保存在由 Clew 托管的私人工作区。桌面版将图谱保存在你的电脑上。
+## 构建 Windows x64
 
-## 如何使用
+准备 Windows x64、Node.js 22.22.2 或更高版本，以及带 Python 启动器的 Python 3.12。在 PowerShell 中运行：
 
-1. **确定起点和目标。** 告诉助手你已经学过什么、想学到哪里，也可以从自己的笔记开始。
-2. **建立图谱。** 审阅建议添加的主题和先修关系，再将提案应用到图谱。点开任意主题可以查看先修路径。
-3. **学习和练习。** 和助手讨论主题、查找资料、做测验，并在图谱中记录笔记和学习进度。
-4. **按需调整。** 让助手扩展或调整学习路径。每次图谱变更由你确认，也可以恢复之前的快照。
-
-桌面版支持导入 Obsidian 仓库、导出 Markdown 或 Clew 图谱包，以及通过 MCP 向其他助手提供只读的学习上下文。
-
-## 安装桌面版
-
-前往 [Releases](https://github.com/miuuyy/Clew/releases/latest) 下载对应的安装包。
-
-| 平台 | 安装包 |
-| --- | --- |
-| Windows | x64 安装程序 |
-| macOS 13 或更高版本 | Apple 芯片版和 Intel 版，提供 DMG 或 ZIP |
-| Linux | x64 和 arm64，提供 AppImage 或 Debian 软件包 |
-
-打开 Clew，选择 **使用 ChatGPT 继续**。桌面版需要 ChatGPT **Plus 或 Pro** 订阅，并需要你授权 Clew 使用订阅用量。无须安装 Python、Node 或 Codex CLI，也无须提供 API 密钥。GitHub 加星和关注 X 都是可选操作。
-
-Clew 1.1.0 支持简体中文。你可以在登录界面切换语言，登录后也可以在 **设置 → 助手与工作区 → 界面语言** 中修改。使用较早版本时，从上方发布页面下载最新安装包即可更新。
-
-macOS 安装包使用临时签名。平台要求、安装包签名、更新方式和本地数据位置见[中文桌面安装指南](docs/DESKTOP.zh-CN.md)。
-
-### 隐私和本地控制
-
-- 图谱、快照和对话历史存储在本地 SQLite 数据库中。
-- ChatGPT 登录凭据存储在操作系统的凭据管理器中。
-- AI 请求会将本次对话和相关的学习信息发送给 OpenAI，使用你现有订阅的用量。
-- 在 **ChatGPT → 设置 → 用量 → 应用限额** 中，可以为 Clew 设置每周用量上限。
-- 助手提出图谱变更，由 Clew 验证，再由你决定是否应用。退出登录会锁定工作区界面，本地数据仍会保留。
-
-ChatGPT 插件托管工作区的政策见[隐私政策](https://clew.my/app/privacy)和[使用条款](https://clew.my/app/terms)。
-
-## 开发
-
-需要 Node 22.22.2+、Python 3.11+ 和系统凭据管理器。
-
-```bash
-git clone https://github.com/miuuyy/Clew.git
+```powershell
+git clone https://github.com/add1cter/Clew.git
 cd Clew
-cp .env.example .env
-./scripts/dev.sh
-```
-
-打开 `http://127.0.0.1:5178`。浏览器开发版使用同一个 ChatGPT 登录流程。安装工具后也可以运行 Electron 应用：
-
-```bash
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -e backend -r desktop/requirements.txt
 npm ci
-npm run dev
+npm --prefix frontend ci
+npm run package -- --win --x64 --publish never
+npm run smoke:package
 ```
 
-Windows 环境配置和发布构建见[桌面安装指南](docs/DESKTOP.zh-CN.md)。
+安装包输出到 `desktop/artifacts/`。开发时可在安装依赖后运行 `npm run dev`。更多环境说明见[桌面开发文档](docs/DESKTOP.zh-CN.md)，本分支的构建和发布范围为 Windows x64。
 
-```bash
-npm run check:version
-npm run test:desktop
-npm --prefix frontend run typecheck
-npm --prefix frontend run test
-npm --prefix frontend run test:localization
-npm --prefix frontend run build
-PYTHONPATH=backend ./.venv/bin/python -m unittest discover -s backend/tests -v
-```
+也可以在 GitHub Actions 中手动运行 **Release** 工作流并下载构建产物。如果 GitHub 提示未启用 Actions，需先在本 fork 中启用。版本标签构建会准备草稿发布，由仓库所有者正式发布。
 
-## 源码目录
+## 上游与维护
 
-| 目录 | 内容 |
-| --- | --- |
-| `desktop/` | Electron 启动与退出、后端打包、各平台构建和发布验证 |
-| `frontend/src/` | 登录、图谱工作区、提案审阅和学习界面 |
-| `backend/app/agent/` | ChatGPT 登录、Responses 请求和助手工具 |
-| `backend/app/services/` | SQLite 数据存储、快照、提案验证和测验评分 |
-| `contracts/` | 图谱操作与提案的数据契约 |
-| `docs/` | 工程文档 |
-| `docs/site_faq/` | 产品文档源码 |
+这是个人定制分支，与官方项目分别维护。这里的修改作用于本仓库的桌面版源码；ChatGPT 中的托管插件由上游运营。
 
-了解产品边界和关键技术决策，可阅读[架构](docs/ARCHITECTURE.md)和[项目背景](docs/agents/PROJECT_CONTEXT.md)。
+原项目为 [miuuyy/Clew](https://github.com/miuuyy/Clew)，作者 Aleksandr Vechenkov。保留原作者版权声明和 [MIT 许可证](LICENSE)。
+
+更多说明：[自用分支说明](docs/PERSONAL_FORK.md) · [架构文档](docs/ARCHITECTURE.md) · [上游仓库](https://github.com/miuuyy/Clew)

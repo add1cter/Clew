@@ -1,113 +1,50 @@
-# Clew
-
-Personal Windows fork of [miuuyy/Clew](https://github.com/miuuyy/Clew). See [fork changes and build instructions](docs/PERSONAL_FORK.md).
+# Clew for Windows — Personal Fork
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-[Try in ChatGPT](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e) · [Download desktop](https://github.com/miuuyy/Clew/releases/latest) · [Docs](https://clew.my/docs) · [Contributing](CONTRIBUTING.md) · [MIT](LICENSE)
+A personal Windows fork of [miuuyy/Clew](https://github.com/miuuyy/Clew), focused on Chinese-language study. Clew organizes learning topics, prerequisites, quizzes and progress in a local knowledge graph.
 
-**An AI learning harness built around an interactive knowledge graph.**
+## Changes in this fork
 
-[![Clew in ChatGPT: a learning graph taking shape, topic navigation, and starting a practice test](.github/readme-assets/chatgpt-demo.gif)](https://github.com/miuuyy/Clew/raw/refs/heads/main/.github/readme-assets/chatgpt-demo.mp4)
+- Fix storage of long ChatGPT login credentials on Windows by splitting them into verified entries in the OS credential store.
+- Generate quiz questions, choices and explanations in the graph's language. Regenerate cached quizzes when the graph language changes.
+- Allow prerequisite completion requirements to be disabled per workspace, while preserving prerequisite relationships and hints.
+- Build and release Windows x64 only. Keep other platform source files to make upstream merges easier.
+- Point new builds' update checks and release publishing to [add1cter/Clew](https://github.com/add1cter/Clew/releases).
 
-[Watch the 45-second demo](https://github.com/miuuyy/Clew/raw/refs/heads/main/.github/readme-assets/chatgpt-demo.mp4) · Recorded in the ChatGPT plugin.
+## Use
 
-Tell Clew what you already know and what you want to learn. It builds a map of topics and prerequisites, then helps you study along the way. Use it in ChatGPT or in the open-source desktop app.
+Windows installers, when published, are available from this fork's [Releases](https://github.com/add1cter/Clew/releases). You can also build from source below.
 
-## Try Clew
+Open Clew and choose **Continue with ChatGPT**. The app requires a ChatGPT Plus or Pro plan and permission to use that plan.
 
-**[Open Clew in ChatGPT →](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e)**
+For Chinese quizzes, set the **graph language** to Simplified Chinese (`zh-CN`); the interface language is a separate preference. To allow completion tests before prerequisites are finished, set the workspace configuration `require_prerequisite_closure_for_completion` to `false`. Passing a test then completes only its target topic.
 
-Install the plugin, connect Clew, and tell ChatGPT what you want to learn. For example:
+Graphs, conversations and learning progress stay in the local workspace database. Login credentials stay in the OS credential store. AI requests send the conversation and relevant learning context to OpenAI. Personal workspace settings and data are not included in this repository.
 
-> I know basic algebra and want to build my first machine learning project. Create a learning path in Clew, including the foundations I am missing.
+## Build Windows x64
 
-Your learning graph opens alongside the conversation. Sign in to save your paths in a private workspace hosted by Clew.
+Use Windows x64, Node.js 22.22.2 or newer, and Python 3.12 installed with the Python launcher. Run in PowerShell:
 
-Prefer a workspace on your own computer? The open-source desktop app stores your graphs locally. Installation details are below.
-
-## How it works
-
-1. **Set your starting point and goal.** Tell the assistant what you know and what you want to learn, or bring your own notes.
-2. **Build your map.** Review proposed topics and prerequisites, then apply them. Select any topic to see what you need to learn first and what it unlocks.
-3. **Study and practice.** Discuss topics with AI, find resources, take quizzes, and keep notes and progress attached to your map.
-4. **Adjust as you go.** Ask the assistant to extend or reshape your path. You review each proposed change and can restore an earlier snapshot.
-
-On desktop, you can also import an Obsidian vault, export Markdown or a graph, and share read-only learning context with other assistants through MCP.
-
-## Install the desktop app
-
-Download the build for your computer from [Releases](https://github.com/miuuyy/Clew/releases/latest).
-
-| Platform | Builds |
-| --- | --- |
-| Windows | x64 installer |
-| macOS 13+ | Apple Silicon and Intel, DMG or ZIP |
-| Linux | x64 and arm64, AppImage or Debian package; see platform requirements |
-
-Open Clew and select **Continue with ChatGPT**. The desktop app requires a ChatGPT **Plus or Pro** plan and permission to use that plan. You do not need Python, Node, an API key, or the Codex CLI installed.
-
-Clew 1.1.0 adds Simplified Chinese alongside English. Choose the interface language on the sign-in screen or under **Settings → Assistant and workspace → Interface language**. New graphs default to the interface language and have their own language setting.
-
-GitHub stars and X follows are optional. They do not unlock features or change access.
-
-macOS downloads use an ad-hoc signature. See [installation notes](docs/DESKTOP.md) for platform requirements, installer signing and data locations.
-
-**Help → Check for Updates** opens the newer release's installer page. Updates are installed manually and retain local data.
-
-The desktop app includes two graph views, Midnight and Paper themes, and completion quizzes.
-
-### Desktop privacy and control
-
-- Graphs, snapshots, and conversation history are stored in a local SQLite database.
-- ChatGPT credentials stay in the operating system's credential store.
-- AI requests send the conversation and scoped learning context to OpenAI. They use your existing plan allowance.
-- Set Clew's weekly allowance in **ChatGPT → Settings → Usage → App limits**.
-- The model proposes changes. Clew validates them; you choose whether to apply them.
-- Sign-out locks the workspace interface without deleting local data.
-
-For the ChatGPT plugin's hosted workspace, see the [privacy policy](https://clew.my/app/privacy) and [terms](https://clew.my/app/terms).
-
-## Development
-
-Requirements: Node 22.22.2+, Python 3.11+, and an OS credential store.
-
-```bash
-git clone https://github.com/miuuyy/Clew.git
+```powershell
+git clone https://github.com/add1cter/Clew.git
 cd Clew
-cp .env.example .env
-./scripts/dev.sh
-```
-
-Open `http://127.0.0.1:5178`. The browser development build uses the same ChatGPT entry screen. To run the Electron app, install its tooling and start it:
-
-```bash
+py -3.12 -m venv .venv
+.\.venv\Scripts\python -m pip install -e backend -r desktop/requirements.txt
 npm ci
-npm run dev
+npm --prefix frontend ci
+npm run package -- --win --x64 --publish never
+npm run smoke:package
 ```
 
-For native Windows setup and release builds, see [Desktop development](docs/DESKTOP.md).
+The installer is written to `desktop/artifacts/`. For development, run `npm run dev` after installing dependencies. See [desktop development](docs/DESKTOP.md) for more details; the build and release scope of this fork is Windows x64.
 
-```bash
-npm run check:version
-npm run test:desktop
-npm --prefix frontend run typecheck
-npm --prefix frontend run test
-npm --prefix frontend run test:localization
-npm --prefix frontend run build
-PYTHONPATH=backend ./.venv/bin/python -m unittest discover -s backend/tests -v
-```
+The **Release** GitHub Actions workflow can also be run manually to produce downloadable build artifacts. Enable Actions in the fork first if GitHub requests it. Version tags prepare a draft release; the repository owner publishes it.
 
-## Source map
+## Upstream and maintenance
 
-| Directory | Owns |
-| --- | --- |
-| `desktop/` | Electron lifecycle, local backend packaging, native builds and release checks |
-| `frontend/src/` | Sign-in, graph workspace, proposal review and study UI |
-| `backend/app/agent/` | ChatGPT authentication, Responses requests and typed tools |
-| `backend/app/services/` | SQLite repository, snapshots, validation and grading |
-| `contracts/` | Graph operation and proposal contracts |
-| `docs/` | Engineering documentation |
-| `docs/site_faq/` | Product documentation source |
+This is a personal customization, maintained separately from the official project. Changes here apply to the desktop source in this repository; the hosted ChatGPT plugin is operated by upstream.
 
-Read [Architecture](docs/ARCHITECTURE.md) and [Project Context](docs/agents/PROJECT_CONTEXT.md) before changing product behavior.
+The original project is [miuuyy/Clew](https://github.com/miuuyy/Clew), created by Aleksandr Vechenkov. The original copyright notice and [MIT license](LICENSE) are retained.
+
+More: [fork notes](docs/PERSONAL_FORK.md) · [architecture](docs/ARCHITECTURE.md) · [upstream repository](https://github.com/miuuyy/Clew)
