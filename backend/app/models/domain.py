@@ -122,6 +122,7 @@ class TopicClosureStatus(BaseModel):
 
 
 class TopicQuizSession(BaseModel):
+    language: GraphLanguage = "en"
     session_id: str
     graph_id: str
     topic_id: str
@@ -312,6 +313,7 @@ class UpdateWorkspaceConfigRequest(BaseModel):
     quiz_question_count: int | None = Field(default=None, ge=6, le=12)
     pass_threshold: float | None = Field(default=None, gt=0, le=1)
     enable_closure_tests: bool | None = None
+    require_prerequisite_closure_for_completion: bool | None = None
     debug_mode_enabled: bool | None = None
     memory_history_message_limit: int | None = Field(default=None, ge=4, le=120)
     memory_include_graph_context: bool | None = None

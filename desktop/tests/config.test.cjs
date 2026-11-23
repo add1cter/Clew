@@ -5,17 +5,19 @@ const path = require('node:path');
 const { parse } = require('yaml');
 const builder = require('../builder.cjs');
 
-test('native release matrix covers exactly the five supported targets and drafts publication', () => {
+test('personal fork builds only Windows and drafts publication', () => {
   const release = parse(fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/release.yml'), 'utf8'));
   assert.deepEqual(release.jobs.build.strategy.matrix.include.map(item => [item.runner, item.arch]), [
-    ['windows-latest', 'x64'], ['macos-15', 'arm64'], ['macos-15-intel', 'x64'], ['ubuntu-22.04', 'x64'], ['ubuntu-24.04-arm', 'arm64']
+    ['windows-latest', 'x64']
   ]);
   assert.equal(release.permissions.contents, 'read');
   const draft = release.jobs['prepare-release'];
   assert.equal(draft.needs, 'build');
   assert.equal(draft.permissions.contents, 'write');
   assert.match(draft.steps.find(step => step.name === 'Prepare draft for owner publication').run, /--draft/);
-  assert.match(draft.steps.find(step => step.run?.includes('collect-release')).run, /--complete/);
+  assert.match(draft.steps.find(step => step.run?.includes('collect-release')).run, /--windows/);
+  const ci = parse(fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/ci.yml'), 'utf8'));
+  assert.equal(ci.jobs.checks['runs-on'], 'windows-latest');
 });
 
 test('packaging preserves signing limits, data and sandbox requirements', () => {

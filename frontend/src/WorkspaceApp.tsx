@@ -506,7 +506,8 @@ export default function WorkspaceApp({ chatgpt, ...preference }: { chatgpt: Chat
   const selectedZoneLabel = selectedZoneTitles.join(" · ");
   const selectedResourceLinks = useMemo(() => selectedTopic?.resources ?? [], [selectedTopic]);
   const selectedArtifacts = useMemo(() => selectedTopic?.artifacts ?? [], [selectedTopic]);
-  const selectedClosureStatus = useMemo(() => computeClosureStatus(activeGraph, selectedTopicId), [activeGraph, selectedTopicId]);
+  const requirePrerequisiteClosure = currentConfig?.require_prerequisite_closure_for_completion ?? true;
+  const selectedClosureStatus = useMemo(() => computeClosureStatus(activeGraph, selectedTopicId, requirePrerequisiteClosure), [activeGraph, selectedTopicId, requirePrerequisiteClosure]);
   const activeAssessmentCards = useMemo(
     () => (assessment?.cards.length ? assessment.cards : fallbackAssessment.cards).filter((card) => card.kind !== "roadmap" && card.kind !== "closure"),
     [assessment?.cards, fallbackAssessment.cards],

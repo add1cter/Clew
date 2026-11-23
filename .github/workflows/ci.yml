@@ -3,6 +3,10 @@ name: CI
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 on:
   push:
     branches:
@@ -13,7 +17,7 @@ on:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout

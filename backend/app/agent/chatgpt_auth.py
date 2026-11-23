@@ -5,8 +5,11 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import math
 import secrets
+import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -103,6 +106,55 @@ class KeyringCredentialStore:
 
     def __init__(self, account: str = "connection"):
         self.account = account
+        self._lock = threading.RLock()
+
+    def _get(self, keyring, service: str) -> str | None:
+        try:
+            return keyring.get_password(service, self.account)
+        except Exception as exc:
+            # Windows 后端的原生错误不一定继承 KeyringError，也必须转换为安全的应用错误。
+            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not be read.") from exc
+
+    def _set(self, keyring, service: str, value: str) -> None:
+        try:
+            keyring.set_password(service, self.account, value)
+        except Exception as exc:
+            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not save the ChatGPT connection.") from exc
+
+    def _remove(self, keyring, service: str) -> None:
+        try:
+            keyring.delete_password(service, self.account)
+        except keyring.errors.PasswordDeleteError as exc:
+            if self._get(keyring, service) is not None:
+                raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not remove the ChatGPT connection.") from exc
+        except Exception as exc:
+            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not remove the ChatGPT connection.") from exc
+
+    @staticmethod
+    def _manifest(value: dict) -> dict | None:
+        if "_clew_chunks" not in value:
+            return None
+        manifest = value["_clew_chunks"]
+        if (not isinstance(manifest, dict) or manifest.get("version") != 1
+                or not isinstance(manifest.get("generation"), str)
+                or len(manifest["generation"]) != 32
+                or any(char not in "0123456789abcdef" for char in manifest["generation"])
+                or type(manifest.get("count")) is not int or not 1 <= manifest["count"] <= 256
+                or not isinstance(manifest.get("sha256"), str) or len(manifest["sha256"]) != 64):
+            raise ChatGPTError("credential_storage_corrupt", "The saved ChatGPT connection is unreadable. Sign out and sign in again.")
+        return manifest
+
+    def _chunk_services(self, manifest: dict) -> list[str]:
+        return [f"{self.service} / {self.account} / {manifest['generation']} / {index}"
+                for index in range(manifest["count"])]
+
+    def _old_manifest(self, raw: str | None) -> dict | None:
+        try:
+            value = json.loads(raw) if raw is not None else None
+            return self._manifest(value) if isinstance(value, dict) else None
+        except (ValueError, ChatGPTError):
+            # 登出仍可移除损坏的旧根条目；不根据无法验证的内容拼出其他凭据名称。
+            return None
 
     def _keyring(self):
         try:
@@ -119,43 +171,73 @@ class KeyringCredentialStore:
         return keyring
 
     def read(self) -> dict | None:
-        keyring = self._keyring()
-        try:
-            raw = keyring.get_password(self.service, self.account)
-        except keyring.errors.KeyringError as exc:
-            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not be read.") from exc
-        if raw is None:
-            return None
-        try:
-            value = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ChatGPTError("credential_storage_corrupt", "The saved ChatGPT connection is unreadable. Sign out and sign in again.") from exc
-        if not isinstance(value, dict):
-            raise ChatGPTError("credential_storage_corrupt", "The saved ChatGPT connection is unreadable. Sign out and sign in again.")
-        return value
+        with self._lock:
+            keyring = self._keyring()
+            raw = self._get(keyring, self.service)
+            if raw is None:
+                return None
+            try:
+                value = json.loads(raw)
+                if not isinstance(value, dict):
+                    raise ValueError("not a credential object")
+                manifest = self._manifest(value)
+                if manifest is not None:
+                    chunks = [self._get(keyring, service) for service in self._chunk_services(manifest)]
+                    if any(chunk is None for chunk in chunks):
+                        raise ValueError("missing credential chunk")
+                    raw = "".join(chunks)
+                    if not hmac.compare_digest(hashlib.sha256(raw.encode("utf-8")).hexdigest(), manifest["sha256"]):
+                        raise ValueError("credential checksum mismatch")
+                    value = json.loads(raw)
+                    if not isinstance(value, dict):
+                        raise ValueError("not a credential object")
+                return value
+            except (ValueError, TypeError) as exc:
+                raise ChatGPTError("credential_storage_corrupt", "The saved ChatGPT connection is unreadable. Sign out and sign in again.") from exc
 
     def write(self, value: dict) -> None:
-        keyring = self._keyring()
-        try:
-            keyring.set_password(self.service, self.account, json.dumps(value))
-        except keyring.errors.KeyringError as exc:
-            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not save the ChatGPT connection.") from exc
+        with self._lock:
+            keyring = self._keyring()
+            previous = self._old_manifest(self._get(keyring, self.service))
+            raw = json.dumps(value, ensure_ascii=True)
+            created: list[str] = []
+            try:
+                if sys.platform == "win32" and len(raw) > 1000:
+                    # keyring 在 Windows 以 UTF-16 存储：1000 个 ASCII 字符为 2000 字节，低于 2560 上限。
+                    chunks = [raw[index:index + 1000] for index in range(0, len(raw), 1000)]
+                    if len(chunks) > 256:
+                        raise ChatGPTError("credential_storage_unavailable", "The ChatGPT connection is too large for the OS credential store.")
+                    manifest = {"version": 1, "generation": secrets.token_hex(16), "count": len(chunks),
+                                "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
+                    for service, chunk in zip(self._chunk_services(manifest), chunks):
+                        self._set(keyring, service, chunk)
+                        created.append(service)
+                    # 全部分块成功后才切换根条目；中途失败保留原连接。
+                    self._set(keyring, self.service, json.dumps({"_clew_chunks": manifest}))
+                else:
+                    self._set(keyring, self.service, raw)
+            except ChatGPTError:
+                self._cleanup_chunks(keyring, created)
+                raise
+            if previous is not None:
+                self._cleanup_chunks(keyring, self._chunk_services(previous))
+
+    def _cleanup_chunks(self, keyring, services: list[str]) -> None:
+        for service in services:
+            try:
+                self._remove(keyring, service)
+            except ChatGPTError:
+                # 新根条目已安全提交或旧根条目仍在；清理失败不破坏可用连接，不记录令牌内容。
+                logging.getLogger(__name__).warning("Could not remove an unused OS credential chunk.")
 
     def delete(self) -> None:
-        keyring = self._keyring()
-        try:
-            keyring.delete_password(self.service, self.account)
-        except keyring.errors.PasswordDeleteError as exc:
-            # Backends also use this error when no password exists. Confirm absence;
-            # a failed deletion must never be reported as a successful sign-out.
-            try:
-                remaining = keyring.get_password(self.service, self.account)
-            except keyring.errors.KeyringError as read_error:
-                raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not confirm removal of the ChatGPT connection.") from read_error
-            if remaining is not None:
-                raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not remove the ChatGPT connection.") from exc
-        except keyring.errors.KeyringError as exc:
-            raise ChatGPTError("credential_storage_unavailable", "The OS credential store could not remove the ChatGPT connection.") from exc
+        with self._lock:
+            keyring = self._keyring()
+            previous = self._old_manifest(self._get(keyring, self.service))
+            if previous is not None:
+                for service in self._chunk_services(previous):
+                    self._remove(keyring, service)
+            self._remove(keyring, self.service)
 
 
 @dataclass

@@ -77,6 +77,31 @@ class QuizRouteTests(unittest.TestCase):
         response = self.client.post("/api/v1/graphs/mathematics-demo/topics/embeddings/quiz/start", json={})
         self.assertEqual(response.status_code, 400)
 
+    def test_disabling_prerequisite_policy_allows_start_and_grading(self):
+        saved = self.client.post("/api/v1/workspace/config", json={"require_prerequisite_closure_for_completion": False})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        url = "/api/v1/graphs/mathematics-demo/topics/embeddings/quiz"
+        result = self.client.post(url + "/start", json={"question_count": 6})
+        self.assertEqual(result.status_code, 200, result.text)
+        session = result.json()["session"]
+        self.assertTrue(session["closure_status"]["can_award_completion"])
+        self.assertTrue(session["closure_status"]["blocked_prerequisite_ids"])
+        answers = [{"question_id": q["id"], "choice_index": 1} for q in session["questions"]]
+        submitted = self.client.post(url + "/submit", json={"session_id": session["session_id"], "answers": answers})
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.assertTrue(submitted.json()["attempt"]["closure_awarded"])
+        self.assertTrue(submitted.json()["closure_status"]["can_award_completion"])
+        self.assertEqual(next(t.state for t in self.repo.graph("mathematics-demo").topics if t.id == "linear-algebra"), "not_started")
+
+    def test_changing_graph_language_does_not_resume_old_english_test(self):
+        first = self.client.post(self.url + "/start", json={"question_count": 6}).json()["session"]
+        self.repo.graph("mathematics-demo").language = "zh-CN"
+        result = self.client.post(self.url + "/start", json={"question_count": 6})
+        self.assertEqual(result.status_code, 200, result.text)
+        second = result.json()["session"]
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertEqual(self.repo.quiz_session(second["session_id"]).language, "zh-CN")
+
     def test_quiz_cannot_be_submitted_to_another_topic(self):
         session = self.client.post(self.url+"/start", json={"question_count": 6}).json()["session"]
         response = self.client.post("/api/v1/graphs/mathematics-demo/topics/functions/quiz/submit", json={"session_id": session["session_id"], "answers": []})

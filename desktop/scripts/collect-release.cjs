@@ -12,7 +12,7 @@ function safeName(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && !value.includes('..');
 }
 
-async function collectRelease(source, destination, { complete = false, version = require('../../package.json').version } = {}) {
+async function collectRelease(source, destination, { complete = false, windowsOnly = false, version = require('../../package.json').version } = {}) {
   source = path.resolve(source);
   destination = path.resolve(destination);
   const relative = path.relative(source, destination);
@@ -40,6 +40,11 @@ async function collectRelease(source, destination, { complete = false, version =
   }
   scan(source);
   if (assets.size === 0 || manifests.size === 0) throw new Error('Release artifacts or manifests are missing.');
+  if (windowsOnly && ([...manifests.keys()].some(name => name !== 'latest.yml')
+      || [...assets.keys()].some(name => ![
+        `Clew-${version}-win-x64.exe`, `Clew-${version}-win-x64.exe.blockmap`,
+        'smoke-win32-x64.json', 'smoke-win32-x64.png'
+      ].includes(name)))) throw new Error('Windows release contains non-Windows assets.');
   const merged = new Map();
   for (const [name, documents] of manifests) {
     const files = new Map();
@@ -71,14 +76,14 @@ async function collectRelease(source, destination, { complete = false, version =
     merged.set(name, { version, files: ordered, path: ordered[0].url, sha512: ordered[0].sha512,
       ...(dates.length ? { releaseDate: dates.at(-1) } : {}) });
   }
-  if (complete) {
-    const expected = [
+  if (complete || windowsOnly) {
+    const expected = (windowsOnly ? ['win-x64.exe'] : [
       'win-x64.exe', 'mac-arm64.dmg', 'mac-arm64.zip', 'mac-x64.dmg', 'mac-x64.zip',
       'linux-x64.AppImage', 'linux-x64.deb', 'linux-arm64.AppImage', 'linux-arm64.deb'
-    ].map(suffix => `Clew-${version}-${suffix}`);
+    ]).map(suffix => `Clew-${version}-${suffix}`);
     for (const asset of expected) if (!assets.has(asset)) throw new Error(`Required release asset missing: ${asset}`);
-    for (const name of allowedManifests) if (!merged.has(name)) throw new Error(`Required updater manifest missing: ${name}`);
-    for (const [platform, arch] of [['win32', 'x64'], ['darwin', 'arm64'], ['darwin', 'x64'], ['linux', 'x64'], ['linux', 'arm64']]) {
+    for (const name of windowsOnly ? ['latest.yml'] : allowedManifests) if (!merged.has(name)) throw new Error(`Required updater manifest missing: ${name}`);
+    for (const [platform, arch] of windowsOnly ? [['win32', 'x64']] : [['win32', 'x64'], ['darwin', 'arm64'], ['darwin', 'x64'], ['linux', 'x64'], ['linux', 'arm64']]) {
       const name = `smoke-${platform}-${arch}.json`;
       if (!assets.has(name) || !assets.has(name.replace('.json', '.png'))) throw new Error(`Missing packaged smoke evidence: ${name}`);
       const receipt = JSON.parse(fs.readFileSync(assets.get(name), 'utf8'));
@@ -101,7 +106,7 @@ async function collectRelease(source, destination, { complete = false, version =
 
 if (require.main === module) {
   const [source, destination, mode] = process.argv.slice(2);
-  if (!source || !destination || (mode && mode !== '--complete')) throw new Error('Usage: collect-release <input> <output> [--complete]');
-  collectRelease(source, destination, { complete: mode === '--complete' }).catch(error => { console.error(error.message); process.exitCode = 1; });
+  if (!source || !destination || (mode && !['--complete', '--windows'].includes(mode))) throw new Error('Usage: collect-release <input> <output> [--complete|--windows]');
+  collectRelease(source, destination, { complete: mode === '--complete', windowsOnly: mode === '--windows' }).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 module.exports = { collectRelease };

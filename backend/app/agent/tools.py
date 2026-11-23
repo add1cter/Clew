@@ -62,7 +62,7 @@ async def execute_tool(runtime: AgentRuntime, run: AgentRun, tool: str, call_id:
             if topic is None:
                 raise ValueError("Topic not found in this conversation's graph.")
             result = {"graph_version": graph.version, "topic": topic.model_dump(mode="json"),
-                      "closure": QuizService(runtime.settings).build_closure_status(graph, topic.id).model_dump(mode="json")}
+                      "closure": QuizService(runtime.settings, require_prerequisites=runtime.repository.current().workspace.config.require_prerequisite_closure_for_completion).build_closure_status(graph, topic.id).model_dump(mode="json")}
         elif tool in {"propose_ingest", "propose_expand"}:
             assert isinstance(parsed, ProposalDraft)
             proposal = ProposalService().prepare(graph, parsed, tool=tool, proposal_id=f"prop-{call_id}",
@@ -92,7 +92,7 @@ async def execute_tool(runtime: AgentRuntime, run: AgentRun, tool: str, call_id:
             questions = [QuizQuestion(id=f"{call_id}-{index}", prompt=q.prompt, choices=q.choices,
                          correct_choice_index=q.correct_choice_index, explanation=q.explanation)
                          for index, q in enumerate(parsed.questions)]
-            session = QuizService(runtime.settings).start_session(graph, parsed.topic_id, count, questions=questions, generator=run.model)
+            session = QuizService(runtime.settings, require_prerequisites=config.require_prerequisite_closure_for_completion).start_session(graph, parsed.topic_id, count, questions=questions, generator=run.model)
             session.session_id = f"quiz-{call_id}"
             runtime.repository.save_quiz_session(session)
             run.quiz_session = session

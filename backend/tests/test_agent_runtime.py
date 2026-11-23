@@ -15,6 +15,14 @@ from fake_chatgpt import FakeChatGPT, fake_runtime
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completion_quiz_explicitly_uses_the_graph_language(self):
+        self.peer.scenario = "closure"
+        self.repo.graph(self.graph_id).language = "zh-CN"
+        session = await self.runtime.generate_closure_quiz(self.graph_id, "arithmetics", 6, None)
+        self.assertEqual(session.language, "zh-CN")
+        payload = json.dumps(self.peer.requests[0], ensure_ascii=False)
+        self.assertIn("Use the graph language (zh-CN) for every question, choice and explanation", payload)
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="clew-runtime-test-")
         self.addCleanup(self.temp.cleanup)

@@ -153,12 +153,12 @@ class AgentRuntime:
     async def generate_closure_quiz(self, graph_id: str, topic_id: str, question_count: int, model: str | None) -> TopicQuizSession:
         from app.services.quiz_service import QuizService
         graph = self.repository.graph(graph_id)
-        closure = QuizService(self.settings).build_closure_status(graph, topic_id)
+        closure = QuizService(self.settings, require_prerequisites=self.repository.current().workspace.config.require_prerequisite_closure_for_completion).build_closure_status(graph, topic_id)
         if not closure.can_award_completion:
             raise ValueError("Close prerequisite topics before taking this completion test.")
         selected = await self._select_model(model)
         run = AgentRun(id=uuid4().hex, graph_id=graph_id, session_id=None, model=selected,
-                       request=GraphChatRequest(prompt=f"Prepare a closure quiz for topic {topic_id}: exactly {question_count} questions. Call create_closure_quiz with the questions.", selected_topic_id=topic_id),
+                       request=GraphChatRequest(prompt=f"Prepare a closure quiz for topic {topic_id}: exactly {question_count} questions. Use the graph language ({graph.language}) for every question, choice and explanation. Call create_closure_quiz with the questions.", selected_topic_id=topic_id),
                        done=asyncio.get_running_loop().create_future(), quiz_topic_id=topic_id, quiz_count=question_count)
         self.runs[run.id] = run
         run.task = asyncio.create_task(self._execute(run, []))

@@ -277,7 +277,7 @@ export function summarizeTopOperations(result: ProposalGenerateResponse, copy: A
     .slice(0, 5);
 }
 
-export function computeClosureStatus(graph: GraphEnvelope | null, topicId: string | null): TopicClosureStatus | null {
+export function computeClosureStatus(graph: GraphEnvelope | null, topicId: string | null, requirePrerequisites = true): TopicClosureStatus | null {
   if (!graph || !topicId) return null;
   const parentsByChild = new Map<string, string[]>();
   const topicById = new Map(graph.topics.map((topic) => [topic.id, topic]));
@@ -314,7 +314,7 @@ export function computeClosureStatus(graph: GraphEnvelope | null, topicId: strin
     topic_id: topicId,
     prerequisite_topic_ids: prerequisiteIds,
     blocked_prerequisite_ids: blockedIds,
-    can_award_completion: blockedIds.length === 0,
+    can_award_completion: !requirePrerequisites || blockedIds.length === 0,
     latest_attempt: latestAttempt,
   };
 }

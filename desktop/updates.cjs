@@ -1,5 +1,5 @@
-const RELEASES = 'https://github.com/miuuyy/Clew/releases';
-const API = 'https://api.github.com/repos/miuuyy/Clew/releases/latest';
+const RELEASES = 'https://github.com/add1cter/Clew/releases';
+const API = 'https://api.github.com/repos/add1cter/Clew/releases/latest';
 
 function versionParts(value) {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) {

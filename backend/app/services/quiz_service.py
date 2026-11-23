@@ -18,8 +18,9 @@ def is_prerequisite_relation(relation: str) -> bool:
 
 
 class QuizService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, require_prerequisites: bool = True):
         self._settings = settings
+        self._require_prerequisites = require_prerequisites
 
     def build_closure_status(self, graph: StudyGraph, topic_id: str) -> TopicClosureStatus:
         topic_map = {topic.id: topic for topic in graph.topics}
@@ -58,7 +59,7 @@ class QuizService:
             topic_id=topic.id,
             prerequisite_topic_ids=prerequisite_ids,
             blocked_prerequisite_ids=blocked_ids,
-            can_award_completion=len(blocked_ids) == 0,
+            can_award_completion=not self._require_prerequisites or len(blocked_ids) == 0,
             latest_attempt=latest_attempt,
         )
 
@@ -81,6 +82,7 @@ class QuizService:
             graph_id=graph.graph_id,
             topic_id=topic_id,
             question_count=len(questions),
+            language=graph.language,
             questions=questions,
             closure_status=closure,
             generator=generator,

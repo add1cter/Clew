@@ -332,7 +332,7 @@ async def start_topic_quiz(
             raise KeyError(topic_id)
         question_count = request.question_count or repository.current().workspace.config.quiz_question_count
         session = repository.latest_quiz_session_for_topic(graph_id, topic_id)
-        if session is None or session.question_count != question_count:
+        if session is None or session.question_count != question_count or session.language != graph.language:
             session = await runtime.generate_closure_quiz(
                 graph_id, topic_id, question_count, request.model,
             )

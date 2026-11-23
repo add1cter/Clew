@@ -14,7 +14,7 @@ module.exports = {
     { from: 'desktop/build/licenses', to: 'LICENSES' },
     { from: 'LICENSE', to: 'LICENSE' }
   ],
-  publish: [{ provider: 'github', owner: 'miuuyy', repo: 'Clew', releaseType: 'draft' }],
+  publish: [{ provider: 'github', owner: 'add1cter', repo: 'Clew', releaseType: 'draft' }],
   mac: {
     category: 'public.app-category.education', icon: 'desktop/assets/icon.png',
     minimumSystemVersion: '13.0', hardenedRuntime: true, identity: '-',

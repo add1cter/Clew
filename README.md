@@ -1,5 +1,7 @@
 # Clew
 
+Personal Windows fork of [miuuyy/Clew](https://github.com/miuuyy/Clew). See [fork changes and build instructions](docs/PERSONAL_FORK.md).
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [Try in ChatGPT](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e) · [Download desktop](https://github.com/miuuyy/Clew/releases/latest) · [Docs](https://clew.my/docs) · [Contributing](CONTRIBUTING.md) · [MIT](LICENSE)

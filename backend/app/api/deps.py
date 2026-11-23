@@ -30,10 +30,10 @@ def get_normalizer() -> ProposalNormalizer:
     return ProposalNormalizer()
 
 
-def get_quiz_service(settings: Settings = Depends(get_settings)) -> "QuizService":
+def get_quiz_service(settings: Settings = Depends(get_settings), repository: GraphRepository = Depends(get_repository)) -> "QuizService":
     from app.services.quiz_service import QuizService
 
-    return QuizService(settings)
+    return QuizService(settings, require_prerequisites=repository.current().workspace.config.require_prerequisite_closure_for_completion)
 
 
 def get_assessment_service() -> AssessmentService:

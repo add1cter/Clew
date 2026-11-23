@@ -1,5 +1,7 @@
 # Clew
 
+这是 [miuuyy/Clew](https://github.com/miuuyy/Clew) 的 Windows 自用分支。修改内容与构建方式见 [自用分支说明](docs/PERSONAL_FORK.md)。
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [在 ChatGPT 中试用](https://chatgpt.com/plugins/plugin_asdk_app_6ac57ed8716c8191a3405a8cea2a0d7e) · [下载桌面版](https://github.com/miuuyy/Clew/releases/latest) · [中文使用指南](docs/USAGE_GUIDE.zh-CN.md) · [参与贡献](CONTRIBUTING.md) · [MIT 许可证](LICENSE)

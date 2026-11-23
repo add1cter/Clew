@@ -81,6 +81,25 @@ class QuizServiceTests(unittest.TestCase):
         self.assertEqual(len(reviews), 6)
         self.assertTrue(all(review.correct_choice for review in reviews))
 
+    def test_unrestricted_quiz_can_complete_topic_without_completing_its_prerequisites(self):
+        repository = self._repository()
+        graph = repository.graph(self.DEMO_GRAPH_ID)
+        service = QuizService(Settings(), require_prerequisites=False)
+        status = service.build_closure_status(graph, "embeddings")
+        self.assertTrue(status.can_award_completion)
+        self.assertIn("linear-algebra", status.blocked_prerequisite_ids)
+        session = service.start_session(graph, "embeddings", 6, questions=self.questions(), generator="test")
+        answers = {q.id: q.correct_choice_index for q in session.questions}
+        attempt, _, awarded, _ = service.grade_session(graph, session, answers)
+        self.assertTrue(attempt.closure_awarded)
+        self.assertEqual(awarded, "solid")
+        repository.save_quiz_session(session)
+        repository.record_quiz_attempt(self.DEMO_GRAPH_ID, attempt, awarded,
+            base_graph_version=graph.version, session_id=session.session_id)
+        updated = repository.graph(self.DEMO_GRAPH_ID)
+        self.assertEqual(next(t.state for t in updated.topics if t.id == "embeddings"), "solid")
+        self.assertEqual(next(t.state for t in updated.topics if t.id == "linear-algebra"), "not_started")
+
     def test_invalid_question_count_fails_instead_of_truncating(self):
         graph = self._repository().graph(self.DEMO_GRAPH_ID)
         with self.assertRaisesRegex(ValueError, "exactly 6"):

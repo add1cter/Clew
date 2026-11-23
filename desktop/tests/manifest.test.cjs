@@ -81,3 +81,31 @@ test('Linux manifests retain verified AppImage and Debian downloads for each arc
     assert.equal(fs.existsSync(path.join(root, 'rejected')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('Windows release requires verified installer and successful native smoke evidence', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-windows-release-'));
+  try {
+    const source = path.join(root, 'source');
+    fs.mkdirSync(source);
+    const url = `Clew-${version}-win-x64.exe`;
+    const body = 'synthetic installer';
+    const item = { url, size: Buffer.byteLength(body), sha512: crypto.createHash('sha512').update(body).digest('base64') };
+    fs.writeFileSync(path.join(source, url), body);
+    fs.writeFileSync(path.join(source, 'latest.yml'), stringify({ version, files: [item] }));
+    const destination = path.join(root, 'output');
+    await assert.rejects(collectRelease(source, destination, { windowsOnly: true }), /smoke evidence/);
+    const receipt = { version, platform: 'win32', arch: 'x64', ok: true, origin: 'clew://app',
+      sandbox: true, persisted: true, backendStopped: true, backendGraceful: true,
+      cors: true, exportCommit: true, whiteMark: true, svgReady: true, storagePhase: 'read' };
+    const smoke = path.join(source, 'smoke-win32-x64.json');
+    fs.writeFileSync(smoke, JSON.stringify({ ...receipt, backendGraceful: false }));
+    fs.writeFileSync(path.join(source, 'smoke-win32-x64.png'), 'synthetic screenshot');
+    await assert.rejects(collectRelease(source, destination, { windowsOnly: true }), /Failed or stale/);
+    assert.equal(fs.existsSync(destination), false);
+    fs.writeFileSync(smoke, JSON.stringify(receipt));
+    execFileSync(process.execPath, [path.join(__dirname, '../scripts/collect-release.cjs'), source, destination, '--windows']);
+    assert.equal(fs.readFileSync(path.join(destination, url), 'utf8'), body);
+    fs.writeFileSync(path.join(source, 'unwanted-mac.zip'), 'synthetic asset');
+    await assert.rejects(collectRelease(source, path.join(root, 'rejected'), { windowsOnly: true }), /non-Windows/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

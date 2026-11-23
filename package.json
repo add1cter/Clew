@@ -9,7 +9,7 @@
   "main": "desktop/main.cjs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/miuuyy/Clew.git"
+    "url": "https://github.com/add1cter/Clew.git"
   },
   "homepage": "https://clew.my",
   "scripts": {

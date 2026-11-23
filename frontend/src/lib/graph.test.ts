@@ -1,13 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import type { Edge, Topic, GraphEnvelope } from "./types";
-import { computeRootTopicIds, computeFocusData } from "./graph";
+import { computeRootTopicIds, computeFocusData, computeClosureStatus } from "./graph";
 
 const topics = [
   { id: "foundation" },
   { id: "dependent" },
   { id: "independent" },
 ] as Topic[];
+
+it("allows completion without closing prerequisite topics when that policy is disabled", () => {
+  const graph = { topics: [{ id: "foundation", state: "not_started" }, { id: "dependent", state: "not_started" }],
+    edges: [{ id: "dependency", source_topic_id: "foundation", target_topic_id: "dependent", relation: "requires" }],
+    quiz_attempts: [] } as unknown as GraphEnvelope;
+  expect(computeClosureStatus(graph, "dependent")?.can_award_completion).toBe(false);
+  const status = computeClosureStatus(graph, "dependent", false)!;
+  expect(status.can_award_completion).toBe(true);
+  expect(status.blocked_prerequisite_ids).toEqual(["foundation"]);
+  expect(graph.topics.every(topic => topic.state === "not_started")).toBe(true);
+});
 
 describe("computeRootTopicIds", () => {
   it("marks only topics without prerequisite parents as starting topics", () => {
