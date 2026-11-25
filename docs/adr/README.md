@@ -23,6 +23,7 @@ ADR files in this repo are meant to capture:
 
 - [0007 - Desktop distribution and required ChatGPT sign-in](0007-desktop-release-and-required-sign-in.md)
 - [0008 - Stable desktop origin and atomic native exports](0008-stable-desktop-origin-and-native-exports.md)
+- [0009 - Personal local plugin shares the desktop repository](0009-local-plugin-shares-desktop-repository.md)
 
 ## Writing rule
 

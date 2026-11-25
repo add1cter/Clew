@@ -36,6 +36,7 @@ import {
 import { useChatModelSelection } from "./hooks/useChatModelSelection";
 import { useGraphChatController } from "./hooks/useGraphChatController";
 import { useWorkspaceSettings } from "./hooks/useWorkspaceSettings";
+import { useWorkspaceLiveRefresh } from "./hooks/useWorkspaceLiveRefresh";
 import { useWorkspaceChromeState } from "./hooks/useWorkspaceChromeState";
 import { useTopicPopover } from "./hooks/useTopicPopover";
 import { useModalAccessibility } from "./lib/useModalAccessibility";
@@ -602,6 +603,20 @@ export default function WorkspaceApp({ chatgpt, ...preference }: { chatgpt: Chat
     if (!response.ok) throw new Error(await readErrorMessage(response, copy.errors.loadWorkspace));
     return (await response.json()) as WorkspaceEnvelope;
   }
+  useWorkspaceLiveRefresh({
+    snapshotId: data?.snapshot.id ?? null,
+    blocked: loading || graphLayoutEditing || configSaving || isSettingsOpen || Boolean(quizSession) || quizLoading
+      || Boolean(applyLoadingMessageId) || createGraphLoading || importGraphLoading || importObsidianLoading || graphLayoutSaving,
+    readRevision: async () => {
+      const response = await apiFetch(`${API_BASE}/api/v1/workspace/revision`);
+      if (!response.ok) throw new Error("Workspace refresh unavailable.");
+      return ((await response.json()) as { snapshot_id: number }).snapshot_id;
+    },
+    refresh: async (canApply) => {
+      const next = await fetchWorkspace();
+      if (canApply()) setData(previous => !previous || next.snapshot.id > previous.snapshot.id ? next : previous);
+    },
+  });
   const loadWorkspaceSurface = useCallback(async (): Promise<WorkspaceSurfacePayload | null> => {
     try {
       const response = await apiFetch(`${API_BASE}/api/v1/workspace/surface`);

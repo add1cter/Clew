@@ -26,6 +26,9 @@ backend/clew_backend.egg-info/
 output/
 frontend/node_modules/
 frontend/dist/
+frontend/local-plugin-dist/
+plugins/clew-local/dist/
+plugins/clew-local/mcp.json
 frontend/test-results/
 backend/workspace.db
 backend/mapmind.db

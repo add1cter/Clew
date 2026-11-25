@@ -267,6 +267,7 @@ export const APP_COPY_ZH_CN = {
     refresh: "刷新",
     snapshotLabel: (id) => `快照 ${id}`,
     snapshotSources: {
+      "local.progress.apply": "本地插件学习进度",
       seed: "已创建工作区",
       rollback: "已恢复快照",
       "proposal.apply": "已应用提案",

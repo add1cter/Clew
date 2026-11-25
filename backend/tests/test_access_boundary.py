@@ -12,12 +12,26 @@ class AccessBoundaryTests(unittest.TestCase):
     def test_signed_out_workspace_cannot_be_read_or_mutated(self):
         client, repo, runtime = install_client(self, signed=False)
         snapshot = repo.current().snapshot.id
-        for method, path in [("get", "/api/v1/workspace/current"), ("post", "/api/v1/workspace/graphs")]:
+        for method, path in [("get", "/api/v1/workspace/current"), ("get", "/api/v1/workspace/revision"), ("post", "/api/v1/workspace/graphs")]:
             response = getattr(client, method)(path)
             self.assertEqual(response.status_code, 401)
             self.assertEqual(response.json()["code"], "not_signed_in")
         self.assertEqual(repo.current().snapshot.id, snapshot)
         self.assertEqual(client.get("/api/v1/chatgpt/account").status_code, 200)
+
+    def test_revision_tracks_external_database_writes(self):
+        from app.local_bridge.service import LocalWorkspaceBridge
+        from app.services.repository import GraphRepository
+        client, repo, runtime = install_client(self)
+        graph = repo.current().workspace.graphs[0]
+        initial = client.get("/api/v1/workspace/revision").json()["snapshot_id"]
+        bridge = LocalWorkspaceBridge(GraphRepository(repo._db_path))
+        review = bridge.prepare(graph.graph_id, graph.topics[0].id, "learning", graph.version, "完成基础练习")
+        applied = bridge.apply(review["review"]["id"])
+        response = client.get("/api/v1/workspace/revision")
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.json()["snapshot_id"], initial)
+        self.assertEqual(response.json()["snapshot_id"], applied["snapshot_id"])
 
     def test_plan_permission_is_required_and_sign_out_relocks(self):
         client, repo, runtime = install_client(self)

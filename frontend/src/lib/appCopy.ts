@@ -265,6 +265,7 @@ export const APP_COPY = {
     refresh: "Refresh",
     snapshotLabel: (id: number) => `Snapshot ${id}`,
     snapshotSources: {
+      "local.progress.apply": "Local plugin progress",
       seed: "Workspace created",
       rollback: "Snapshot restored",
       "proposal.apply": "Proposal applied",

@@ -73,3 +73,7 @@ jobs:
 
       - name: Backend tests
         run: PYTHONPATH=backend python -m unittest discover -s backend/tests -v
+
+      - name: Local plugin build
+        working-directory: frontend
+        run: npm run build:plugin

@@ -14,7 +14,7 @@
   "homepage": "https://clew.my",
   "scripts": {
     "dev": "node desktop/scripts/dev.cjs",
-    "build": "npm --prefix frontend run typecheck && npm --prefix frontend run build && node desktop/scripts/build-backend.cjs",
+    "build": "npm --prefix frontend run typecheck && npm --prefix frontend run build && npm --prefix frontend run build:plugin && node desktop/scripts/build-backend.cjs",
     "test:desktop": "node --test desktop/tests/*.test.cjs",
     "check:version": "node desktop/scripts/check-version.cjs",
     "package": "npm run build && electron-builder --config desktop/builder.cjs",

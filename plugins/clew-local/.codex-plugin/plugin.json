@@ -1,0 +1,15 @@
+{
+  "name": "clew-local",
+  "version": "0.1.0",
+  "description": "与 Clew 桌面版共用本地学习图谱、进度和快照。",
+  "mcpServers": "./mcp.json",
+  "interface": {
+    "displayName": "Clew Local",
+    "shortDescription": "桌面图谱与进度实时共享",
+    "longDescription": "直接使用这台电脑上的 Clew 桌面数据库。查看图谱、读取学习上下文、审阅进度修改；桌面完成测验后，插件自动刷新进度。",
+    "developerName": "add1cter",
+    "category": "Education & Research",
+    "defaultPrompt": ["用 Clew Local 打开我的桌面学习图谱。", "读取我的本地学习进度，继续讲解当前主题。"],
+    "brandColor": "#a88bfa"
+  }
+}

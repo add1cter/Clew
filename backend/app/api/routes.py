@@ -277,6 +277,11 @@ def update_workspace_config(
     return _workspace_config_payload(workspace, settings)
 
 
+@router.get("/api/v1/workspace/revision")
+def workspace_revision(repository: GraphRepository = Depends(get_repository)) -> dict:
+    return {"snapshot_id": repository.current().snapshot.id}
+
+
 @router.get("/api/v1/graphs/{graph_id}")
 def graph_by_id(graph_id: str, repository: GraphRepository = Depends(get_repository)) -> dict:
     try:

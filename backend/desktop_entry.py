@@ -12,6 +12,11 @@ import uvicorn
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "--local-bridge":
+        from app.local_bridge.__main__ import main as bridge_main
+        sys.argv.pop(1)
+        bridge_main()
+        return
     # Bind before announcing readiness, so there is no free-port race.
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))

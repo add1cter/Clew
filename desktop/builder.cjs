@@ -7,6 +7,7 @@ module.exports = {
   directories: { output: 'desktop/artifacts', buildResources: 'desktop/assets' },
   files: ['desktop/*.cjs', 'desktop/assets/icon.png', 'package.json', 'LICENSE'],
   extraResources: [
+    { from: 'plugins/clew-local/dist/workspace.html', to: 'local-plugin/workspace.html' },
     { from: 'desktop/build/backend/ClewBackend', to: 'backend' },
     { from: process.platform === 'win32' ? 'desktop/build/export/ClewExportCommit.exe' : 'desktop/build/export/ClewExportCommit',
       to: process.platform === 'win32' ? 'export/ClewExportCommit.exe' : 'export/ClewExportCommit' },

@@ -12,6 +12,7 @@ A personal Windows fork of [miuuyy/Clew](https://github.com/miuuyy/Clew), focuse
 - Build and release Windows x64 only. Keep other platform source files to make upstream merges easier.
 - Point new builds' update checks and release publishing to [add1cter/Clew](https://github.com/add1cter/Clew/releases).
 - Improve Chinese graph labels and direct-neighbor focus while retaining Clew's chapter clusters and lighting. Both 2D and 3D support dragging nodes and gentle cursor repulsion.
+- Add the Clew Local personal plugin: share the desktop database, automatically refresh progress, and review changes before saving a snapshot. See the [setup guide](docs/LOCAL_PLUGIN.zh-CN.md).
 
 ## Use
 

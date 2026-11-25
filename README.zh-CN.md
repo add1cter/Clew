@@ -12,6 +12,7 @@
 - 仅构建和发布 Windows x64 安装包，保留其它平台源码，方便以后合并上游更新。
 - 新构建的更新检查和发布目标指向 [add1cter/Clew](https://github.com/add1cter/Clew/releases)。
 - 改善中文图谱标签和直接邻居聚焦，保留章节分群与光效；2D、3D 均支持拖动节点和鼠标轻推。
+- 提供 Clew Local 自用插件，与桌面版共用本机数据库，自动刷新图谱进度；进度修改经审阅后保存为快照。见[安装说明](docs/LOCAL_PLUGIN.zh-CN.md)。
 
 ## 使用
 
